@@ -18,6 +18,7 @@ class Config:
     min_warmup_s: float = 30
     stable_window_s: float = 60
     stable_min_steps: int = 20
+    stable_requires_epoch: bool = True
     growth_tol: float = 0.02
     max_warmup_s: float = 600
     oom_growth: float = 1.25
@@ -35,6 +36,10 @@ class Config:
             if f.name == "unknown_min_free":
                 if not isinstance(value, Resources):
                     raise TypeError("unknown_min_free must be a Resources")
+                continue
+            if f.name == "stable_requires_epoch":
+                if not isinstance(value, bool):
+                    raise TypeError("stable_requires_epoch must be a bool")
                 continue
             if isinstance(value, bool) or not isinstance(value, int | float):
                 raise TypeError(f"{f.name} must be a number, got {type(value).__name__}")

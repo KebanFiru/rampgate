@@ -23,6 +23,7 @@ __all__ = [
     "GroupOutcome",
     "MarkStable",
     "Overcommitted",
+    "QueueStopped",
     "Requeue",
     "RequeueReason",
     "Start",
@@ -32,6 +33,7 @@ __all__ = [
     "Warn",
     "WarningKind",
     "canonical",
+    "warning_key",
 ]
 
 
@@ -90,6 +92,7 @@ class Start(_ActionMixin):
     placement: tuple[DeviceId, ...]
     resume: bool
     admitted_free: Mapping[DeviceId, Resources]
+    issued_at: float
 
 
 @dataclass(frozen=True, slots=True)
@@ -137,14 +140,19 @@ class GroupCompleted(_ActionMixin):
 
 @dataclass(frozen=True, slots=True)
 class CapacityExceeded:
+    """A candidate's estimate exceeds the device's capacity: it can never fit there."""
+
     group: GroupId | None
     device_id: DeviceId
     estimated: Resources
     available: Resources
+    job_id: JobId
 
 
 @dataclass(frozen=True, slots=True)
 class Overcommitted:
+    """``sum(R) > C - F`` on a device; ``capacity`` is ``C - F``."""
+
     device_id: DeviceId
     reserved: Resources
     capacity: Resources
@@ -152,8 +160,11 @@ class Overcommitted:
 
 @dataclass(frozen=True, slots=True)
 class ForeignUsageHigh:
+    """Foreign usage is what keeps a candidate from fitting on a device."""
+
     device_id: DeviceId
     foreign: Resources
+    job_id: JobId
 
 
 @dataclass(frozen=True, slots=True)
@@ -164,7 +175,31 @@ class UncleanStop:
     attempt: int
 
 
-WarningKind: TypeAlias = CapacityExceeded | Overcommitted | ForeignUsageHigh | UncleanStop
+@dataclass(frozen=True, slots=True)
+class QueueStopped:
+    """A job of a STOP_QUEUE group failed; reducing this warning pauses the engine."""
+
+    group: GroupId
+    job_id: JobId
+
+
+WarningKind: TypeAlias = (
+    CapacityExceeded | Overcommitted | ForeignUsageHigh | UncleanStop | QueueStopped
+)
+
+
+def warning_key(w: WarningKind) -> str:
+    """Dedup key of a warning: the same key is never emitted twice while it is recorded."""
+    match w:
+        case CapacityExceeded() | ForeignUsageHigh():
+            parts: list[Any] = [type(w).__name__, w.job_id, w.device_id]
+        case Overcommitted():
+            parts = [type(w).__name__, w.device_id, canonical(w.reserved)]
+        case UncleanStop():
+            parts = [type(w).__name__, w.job_id, w.attempt]
+        case QueueStopped():
+            parts = [type(w).__name__, w.group, w.job_id]
+    return json.dumps(parts, sort_keys=True, separators=(",", ":"))
 
 
 @dataclass(frozen=True, slots=True)

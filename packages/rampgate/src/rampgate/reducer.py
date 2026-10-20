@@ -16,6 +16,7 @@ Stale, duplicate and out-of-order events are no-ops recorded in
 
 from __future__ import annotations
 
+import json
 from collections.abc import Iterable, Mapping
 from dataclasses import dataclass, replace
 from enum import StrEnum
@@ -27,6 +28,7 @@ from rampgate.actions import (
     FailReason,
     GroupCompleted,
     MarkStable,
+    QueueStopped,
     Requeue,
     RequeueReason,
     Start,
@@ -34,6 +36,7 @@ from rampgate.actions import (
     UncleanStop,
     UpdateReservation,
     Warn,
+    warning_key,
 )
 from rampgate.config import Config
 from rampgate.events import (
@@ -59,6 +62,7 @@ from rampgate.model import (
     DeviceId,
     DeviceState,
     ExitKind,
+    GroupId,
     HistoryRecord,
     JobId,
     JobRuntime,
@@ -121,7 +125,7 @@ def reduce(state: State, msg: Message, config: Config) -> State:
             paused = isinstance(msg, Paused)
             if state.paused == paused:
                 return _ignore(state, msg, IgnoreReason.DUPLICATE)
-            return replace(state, paused=paused)
+            return replace(state, paused=paused, pause_reason=None)
         case DeviceAdded():
             return _device_added(state, msg)
         case DeviceRemoved():
@@ -134,7 +138,11 @@ def reduce(state: State, msg: Message, config: Config) -> State:
             return _mark_stable(state, msg)
         case Requeue(reason=RequeueReason.START_TIMEOUT):
             return _start_timeout(state, msg)
-        case Requeue() | Fail() | UpdateReservation() | Warn() | GroupCompleted():
+        case GroupCompleted():
+            return _group_completed(state, msg)
+        case Warn():
+            return _warn(state, msg)
+        case Requeue() | Fail() | UpdateReservation():
             return _clear(state, msg)
     raise TypeError(f"not an event or action: {msg!r}")
 
@@ -160,7 +168,32 @@ def _job(state: State, job_id: JobId) -> JobRuntime:
 
 
 def _put(state: State, rt: JobRuntime) -> State:
+    old = state.jobs.get(rt.id)
+    if state.warned and old is not None:
+        state = _prune_warned(state, old, rt)
     return replace(state, jobs=frozen_map({**state.jobs, rt.id: rt}))
+
+
+def _prune_warned(state: State, old: JobRuntime, new: JobRuntime) -> State:
+    """Forget warning keys whose condition can no longer be the same one.
+
+    Candidate warnings of a job end once it leaves PENDING; overcommit
+    warnings of a device end once a reservation on it is released.
+    """
+    left_pending = old.state is JobState.PENDING and new.state is not JobState.PENDING
+    released = {d for d in old.reservation if d not in new.reservation}
+    if not left_pending and not released:
+        return state
+
+    def stale(key: str) -> bool:
+        kind, *rest = json.loads(key)
+        if kind in ("CapacityExceeded", "ForeignUsageHigh"):
+            return left_pending and rest[0] == old.id
+        if kind == "Overcommitted":
+            return rest[0] in released
+        return False
+
+    return replace(state, warned=frozenset(k for k in state.warned if not stale(k)))
 
 
 def _emit(state: State, *actions: Action) -> State:
@@ -185,6 +218,7 @@ def _fresh_attempt() -> dict[str, Any]:
     return {
         "admitted_free": frozen_map(),
         "admitted_alone": frozen_map(),
+        "starting_since": None,
         "warm_start": None,
         "usage": frozen_map(),
         "peak": frozen_map(),
@@ -192,6 +226,8 @@ def _fresh_attempt() -> dict[str, Any]:
         "last_peak_growth_t": None,
         "steps_baseline": None,
         "steps_latest": None,
+        "epoch_baseline": None,
+        "epoch_latest": None,
         "reservation": frozen_map(),
     }
 
@@ -236,8 +272,17 @@ def _job_submitted(state: State, ev: JobSubmitted) -> State:
     unknown = sorted(d for d in job.placement if d not in state.devices)
     if unknown:
         raise InvalidTransition(f"job {job.id!r} is placed on unknown devices {unknown}")
-    rt = JobRuntime(job=job, state=JobState.PENDING, attempt=1, submit_seq=state.next_seq)
+    rt = JobRuntime(
+        job=job, state=JobState.PENDING, attempt=1, submit_seq=state.next_seq, submit_t=ev.t
+    )
+    state = _reopen_group(state, job.group)
     return replace(_put(state, rt), next_seq=state.next_seq + 1)
+
+
+def _reopen_group(state: State, group: GroupId | None) -> State:
+    if group is None or group not in state.completed_groups:
+        return state
+    return replace(state, completed_groups=state.completed_groups - {group})
 
 
 def _job_updated(state: State, ev: JobUpdated) -> State:
@@ -262,6 +307,7 @@ def _job_updated(state: State, ev: JobUpdated) -> State:
     if unknown:
         raise _bad(rt, f"placement names unknown devices {unknown}")
     learned = frozen_map({d: r for d, r in rt.learned.items() if d in job.placement})
+    state = _reopen_group(state, job.group)
     return _put(state, replace(rt, job=job, learned=learned))
 
 
@@ -315,11 +361,8 @@ def _job_observed(state: State, ev: JobObserved, config: Config) -> State:
     if is_peak_growth(old_peak, new_peak, config.growth_tol):
         growth_t = ev.t if growth_t is None else max(growth_t, ev.t)
 
-    baseline, latest = rt.steps_baseline, rt.steps_latest
-    if ev.steps is not None:
-        if latest is None or ev.steps < latest:
-            baseline = ev.steps
-        latest = ev.steps
+    baseline, latest = _rebaseline(rt.steps_baseline, rt.steps_latest, ev.steps)
+    epoch_baseline, epoch_latest = _rebaseline(rt.epoch_baseline, rt.epoch_latest, ev.epoch)
 
     rt = replace(
         rt,
@@ -330,6 +373,8 @@ def _job_observed(state: State, ev: JobObserved, config: Config) -> State:
         steps_baseline=baseline,
         steps_latest=latest,
         reports_steps=rt.reports_steps or ev.steps is not None,
+        epoch_baseline=epoch_baseline,
+        epoch_latest=epoch_latest,
     )
 
     reserved = rt.reservation.get(dev)
@@ -346,6 +391,17 @@ def _job_observed(state: State, ev: JobObserved, config: Config) -> State:
         )
         state = replace(state, outbox=(*outbox, update))
     return _put(state, rt)
+
+
+def _rebaseline(
+    baseline: int | None, latest: int | None, value: int | None
+) -> tuple[int | None, int | None]:
+    """Track a cumulative counter per attempt (SPEC §3.5): first value and decreases re-baseline."""
+    if value is None:
+        return baseline, latest
+    if latest is None or value < latest:
+        baseline = value
+    return baseline, value
 
 
 def _job_exited(state: State, ev: JobExited, config: Config) -> State:
@@ -518,11 +574,15 @@ def _device_added(state: State, ev: DeviceAdded) -> State:
             return _ignore(state, ev, IgnoreReason.DUPLICATE)
         raise InvalidTransition(f"device {ev.device.id!r} already exists with different content")
     return replace(
-        state, devices=frozen_map({**state.devices, ev.device.id: DeviceState(ev.device)})
+        state,
+        devices=frozen_map({**state.devices, ev.device.id: DeviceState(ev.device)}),
+        removed_devices=state.removed_devices - {ev.device.id},
     )
 
 
 def _device_removed(state: State, ev: DeviceRemoved) -> State:
+    if ev.device_id in state.removed_devices:
+        return _ignore(state, ev, IgnoreReason.DUPLICATE)
     if ev.device_id not in state.devices:
         raise InvalidTransition(f"unknown device {ev.device_id!r}")
     users = [rt.id for rt in state.jobs_on(ev.device_id) if rt.state not in TERMINAL_STATES]
@@ -532,7 +592,9 @@ def _device_removed(state: State, ev: DeviceRemoved) -> State:
             "cancel them or move their placement first"
         )
     return replace(
-        state, devices=frozen_map({k: v for k, v in state.devices.items() if k != ev.device_id})
+        state,
+        devices=frozen_map({k: v for k, v in state.devices.items() if k != ev.device_id}),
+        removed_devices=state.removed_devices | {ev.device_id},
     )
 
 
@@ -583,6 +645,7 @@ def _start(state: State, a: Start, config: Config) -> State:
         "state": JobState.STARTING,
         "admitted_free": frozen_map(a.admitted_free),
         "admitted_alone": frozen_map(alone),
+        "starting_since": a.issued_at,
         "applied": rt.applied | {(a.attempt, _START)},
     }
     rt = replace(rt, **fields)
@@ -635,3 +698,15 @@ def _start_timeout(state: State, a: Requeue) -> State:
     elif intent is StopReason.CANCEL:
         rt = replace(rt, state=JobState.CANCELLED)
     return _put(_clear(state, a), rt)
+
+
+def _group_completed(state: State, a: GroupCompleted) -> State:
+    return replace(_clear(state, a), completed_groups=state.completed_groups | {a.group})
+
+
+def _warn(state: State, a: Warn) -> State:
+    state = _clear(state, a)
+    state = replace(state, warned=state.warned | {warning_key(a.warning)})
+    if isinstance(a.warning, QueueStopped):
+        state = replace(state, paused=True, pause_reason=a.warning)
+    return state

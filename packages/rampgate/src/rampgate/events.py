@@ -53,6 +53,11 @@ def _check_attempt(attempt: int) -> None:
 @dataclass(frozen=True, slots=True)
 class JobSubmitted:
     job: Job
+    t: float | None = None
+
+    def __post_init__(self) -> None:
+        if self.t is not None:
+            _check_t(self.t)
 
 
 @dataclass(frozen=True, slots=True)
@@ -108,14 +113,17 @@ class JobObserved:
     t: float
     usage: Resources
     steps: int | None = None
+    epoch: int | None = None
     attempt: int | None = None
 
     def __post_init__(self) -> None:
         _check_t(self.t)
         if self.attempt is not None:
             _check_attempt(self.attempt)
-        if self.steps is not None and (isinstance(self.steps, bool) or self.steps < 0):
-            raise ValueError(f"steps must be a non-negative int, got {self.steps!r}")
+        for name in ("steps", "epoch"):
+            value = getattr(self, name)
+            if value is not None and (isinstance(value, bool) or value < 0):
+                raise ValueError(f"{name} must be a non-negative int, got {value!r}")
 
 
 @dataclass(frozen=True, slots=True)

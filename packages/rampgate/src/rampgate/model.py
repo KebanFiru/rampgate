@@ -11,7 +11,7 @@ from typing import TYPE_CHECKING, TypeAlias, TypeVar
 from rampgate.resources import Resources
 
 if TYPE_CHECKING:
-    from rampgate.actions import Action
+    from rampgate.actions import Action, QueueStopped
     from rampgate.reducer import IgnoredEvent
 
 __all__ = [
@@ -27,6 +27,7 @@ __all__ = [
     "JobId",
     "JobRuntime",
     "JobState",
+    "Snapshot",
     "State",
     "StopReason",
     "frozen_map",
@@ -155,6 +156,7 @@ class JobRuntime:
     state: JobState
     attempt: int
     submit_seq: int
+    submit_t: float | None = None
     has_run: bool = False
     oom_count: int = 0
     lost_count: int = 0
@@ -165,6 +167,7 @@ class JobRuntime:
     last_exit_t: float | None = None
     admitted_free: Mapping[DeviceId, Resources] = field(default_factory=frozen_map)
     admitted_alone: Mapping[DeviceId, bool] = field(default_factory=frozen_map)
+    starting_since: float | None = None
     warm_start: float | None = None
     usage: Mapping[DeviceId, Resources] = field(default_factory=frozen_map)
     peak: Mapping[DeviceId, Resources] = field(default_factory=frozen_map)
@@ -172,6 +175,8 @@ class JobRuntime:
     last_peak_growth_t: float | None = None
     steps_baseline: int | None = None
     steps_latest: int | None = None
+    epoch_baseline: int | None = None
+    epoch_latest: int | None = None
     reservation: Mapping[DeviceId, Resources] = field(default_factory=frozen_map)
 
     @property
@@ -183,6 +188,12 @@ class JobRuntime:
         if self.steps_latest is None or self.steps_baseline is None:
             return 0 if self.reports_steps else None
         return self.steps_latest - self.steps_baseline
+
+    @property
+    def epoch_in_attempt(self) -> int | None:
+        if self.epoch_latest is None or self.epoch_baseline is None:
+            return None
+        return self.epoch_latest - self.epoch_baseline
 
     def prev_estimate(self, device_id: DeviceId) -> Resources | None:
         """``max(declared hint, learned)`` on a device, or None if both are unknown."""
@@ -206,10 +217,18 @@ class DeviceState:
 
     @property
     def foreign(self) -> Resources:
-        """``F_d``: max foreign usage over the samples kept in the window."""
+        """Max foreign usage over the samples kept in the window."""
         out = Resources()
         for _, sample in self.foreign_samples:
             out = out.max(sample)
+        return out
+
+    def foreign_at(self, now: float, window_s: float) -> Resources:
+        """``F_d`` at ``now``: max foreign usage over samples with ``t >= now - window_s``."""
+        out = Resources()
+        for t, sample in self.foreign_samples:
+            if t >= now - window_s:
+                out = out.max(sample)
         return out
 
 
@@ -224,6 +243,10 @@ class State:
     outbox: tuple[Action, ...] = ()
     history_records: tuple[HistoryRecord, ...] = ()
     ignored_events: tuple[IgnoredEvent, ...] = ()
+    completed_groups: frozenset[GroupId] = frozenset()
+    warned: frozenset[str] = frozenset()
+    pause_reason: QueueStopped | None = None
+    removed_devices: frozenset[DeviceId] = frozenset()
 
     @classmethod
     def initial(cls, devices: Iterable[Device] = ()) -> State:
@@ -239,3 +262,31 @@ class State:
             (rt for rt in self.jobs.values() if device_id in rt.job.placement),
             key=lambda rt: rt.submit_seq,
         )
+
+
+@dataclass(frozen=True, slots=True)
+class Snapshot:
+    """What ``decide`` sees: the state plus estimator results resolved beforehand.
+
+    ``estimates[job][device]`` is the estimator's answer (None = unknown);
+    ``decide`` combines it with the declared hint and the learned estimate.
+    """
+
+    state: State
+    estimates: Mapping[JobId, Mapping[DeviceId, Resources | None]] = field(
+        default_factory=frozen_map
+    )
+
+    def estimate(self, rt: JobRuntime, device_id: DeviceId) -> Resources | None:
+        """``E_j,d = max(estimator result, declared hint, learned)``, or None if all unknown."""
+        known = [
+            e
+            for e in (self.estimates.get(rt.id, {}).get(device_id), rt.prev_estimate(device_id))
+            if e is not None
+        ]
+        if not known:
+            return None
+        out = known[0]
+        for e in known[1:]:
+            out = out.max(e)
+        return out

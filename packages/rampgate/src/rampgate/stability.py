@@ -21,12 +21,11 @@ def is_stable(rt: JobRuntime, now: float, config: Config) -> bool:
     """Rule S: may this WARMING job be marked STABLE at ``now``?
 
     ``now - warm_start >= min_warmup_s`` and either
-    - the peak has been quiet for ``stable_window_s`` and, if the job reports
-      steps, it made ``stable_min_steps`` steps in this attempt; or
-    - ``now - warm_start >= max_warmup_s``.
-
-    Jobs that never reported steps (in any attempt) are judged on the time
-    conditions alone.
+    - the peak has been quiet for ``stable_window_s`` and the progress gates
+      pass: ``stable_min_steps`` steps in this attempt if the job has ever
+      reported steps, and (with ``stable_requires_epoch``) one full epoch in
+      this attempt if it reports ``epoch`` in this attempt; or
+    - ``now - warm_start >= max_warmup_s``, which caps both gates.
     """
     if rt.state is not JobState.WARMING or rt.warm_start is None:
         return False
@@ -41,4 +40,7 @@ def is_stable(rt: JobRuntime, now: float, config: Config) -> bool:
     if now - quiet_since < config.stable_window_s:
         return False
     steps = rt.steps_in_attempt
-    return steps is None or steps >= config.stable_min_steps
+    if steps is not None and steps < config.stable_min_steps:
+        return False
+    epochs = rt.epoch_in_attempt
+    return not (config.stable_requires_epoch and epochs is not None and epochs < 1)
