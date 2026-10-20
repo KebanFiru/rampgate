@@ -63,6 +63,7 @@ class SimExecutor:
         self.procs: dict[JobId, _Proc] = {}
         self.progress: dict[JobId, float] = {}
         self.jobs: dict[JobId, Job] = {}
+        self.exits: dict[tuple[JobId, int], JobExited] = {}
 
     def apply(self, actions: Iterable[Action], now: float, jobs: Mapping[JobId, Job]) -> None:
         for action in actions:
@@ -100,7 +101,23 @@ class SimExecutor:
         job_id = proc.job.id
         self.progress[job_id] = self.progress.get(job_id, 0.0) + kept
         del self.procs[job_id]
-        return JobExited(job_id, proc.attempt, kind, now, oom_dims)
+        exit_event = JobExited(job_id, proc.attempt, kind, now, oom_dims)
+        self.exits[(job_id, proc.attempt)] = exit_event
+        return exit_event
+
+    def truth(self, job_id: JobId, attempt: int) -> tuple[str, float | None, JobExited | None]:
+        """Ground truth for reconciliation: ``("running", began, None)``,
+        ``("starting", None, None)``, ``("exited", None, exit)`` or ``("unknown", None, None)``.
+        """
+        proc = self.procs.get(job_id)
+        if proc is not None and proc.attempt == attempt:
+            if proc.began is None:
+                return "starting", None, None
+            return "running", proc.began, None
+        exit_event = self.exits.get((job_id, attempt))
+        if exit_event is not None:
+            return "exited", None, exit_event
+        return "unknown", None, None
 
     def advance(self, now: float) -> list[Event]:
         """Everything that happened up to ``now``, in a deterministic order."""
