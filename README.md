@@ -9,7 +9,7 @@ rampgate is an **observation-based admission scheduler** packaged as a small, em
 - **Observed-peak reservation:** reserve `observed_peak × safety_margin`, growing if the peak grows.
 - **OOM feedback:** an OOM grows the estimate and re-queues the job to resume from its checkpoint.
 
-**Status:** pre-alpha, under construction (phase L2 of [SPEC.md](SPEC.md) done: `decide`, policies, estimators and a minimal simulator). Not on PyPI yet.
+**Status:** pre-alpha, under construction (phases L0–L3 of [SPEC.md](SPEC.md) done: model, reducer, `decide`, policies, estimators, `Engine` with persistence, and a minimal simulator). Not on PyPI yet.
 
 ## Packages
 

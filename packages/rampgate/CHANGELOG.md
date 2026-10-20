@@ -17,7 +17,14 @@
 - Rule S epoch gate (`JobObserved.epoch`, `Config.stable_requires_epoch`); `JobSubmitted.t` for aging (L2).
 - `rampgate.sim`: workloads (`RampPlateau`, `StepProfile`, `Spiky`, `EpochEval`), `SimExecutor` with the OOM model, `Scenario` and `simulate` (L2).
 
+- `Engine` (L3): the SPEC §4 API, `tick` with estimator I/O, `apply`, `unreconciled()`, versioned `dump`/`load` (L3).
+- `dump_state` / `load_state`: lossless, allowlisted, versioned JSON for the whole state, with a migration table and `UnsupportedSchema` (L3).
+- `InMemoryHistoryStore.to_json` / `from_json`; `simulate(..., restart_at=...)` runs through the Engine and can restart mid-run (L3).
+- `Start.estimate`; `unknown_min_free` as a fraction of capacity (default 10 %); edge-triggered warnings with `WarnCleared`; `BlockedByForeignUsage` (L2 follow-up).
+
 ### Changed
+- Unknown-estimate jobs use Rule A's direct comparison against `unknown_min_free` and are refused on overcommitted devices (L2 follow-up).
+- `CapacityExceeded`, `Overcommitted` and `ForeignUsageHigh` are edge-triggered; `ForeignUsageHigh` is keyed by device and lists the blocked jobs (L2 follow-up).
 - `max_lost_retries` now counts retries, like `max_oom_retries` (fails on the 4th consecutive LOST by default) (L2).
 - `DeviceRemoved` of an already removed device is ignored as a duplicate (L2).
 
