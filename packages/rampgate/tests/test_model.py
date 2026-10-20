@@ -20,6 +20,7 @@ from rampgate import (
     JobStarted,
     MarkStable,
     Overcommitted,
+    QueueStopped,
     Requeue,
     RequeueReason,
     Resources,
@@ -29,6 +30,7 @@ from rampgate import (
     UncleanStop,
     UpdateReservation,
     Warn,
+    warning_key,
 )
 from rampgate.actions import canonical
 
@@ -92,16 +94,17 @@ def test_oom_dims_only_for_oom() -> None:
 
 R = Resources(vram=1)
 ALL_ACTIONS = [
-    Start("j", 1, ("a",), False, {"a": R}),
+    Start("j", 1, ("a",), False, {"a": R}, 0.0),
     Stop("j", 1, StopReason.PREEMPT, 120),
     MarkStable("j", 1, {"a": R}),
     UpdateReservation("j", 1, {"a": R}),
     Requeue("j", 2, {"a": None}, RequeueReason.OOM),
     Fail("j", 1, FailReason.OOM_RETRIES_EXHAUSTED),
     GroupCompleted("g", GroupOutcome.OK),
-    Warn(CapacityExceeded("g", "a", R, Resources())),
+    Warn(CapacityExceeded("g", "a", R, Resources(), "j")),
     Warn(Overcommitted("a", R, R)),
-    Warn(ForeignUsageHigh("a", R)),
+    Warn(ForeignUsageHigh("a", R, "j")),
+    Warn(QueueStopped("g", "j")),
     Warn(UncleanStop("j", 1)),
 ]
 
@@ -114,10 +117,10 @@ def test_action_ids_are_deterministic_and_distinct() -> None:
 
 
 def test_action_id_depends_on_attempt_and_content() -> None:
-    a = Start("j", 1, ("a",), False, {"a": R})
-    assert a.action_id == Start("j", 1, ("a",), False, {"a": Resources(vram=1)}).action_id
-    assert a.action_id != Start("j", 2, ("a",), False, {"a": R}).action_id
-    assert a.action_id != Start("j", 1, ("a",), True, {"a": R}).action_id
+    a = Start("j", 1, ("a",), False, {"a": R}, 0.0)
+    assert a.action_id == Start("j", 1, ("a",), False, {"a": Resources(vram=1)}, 0.0).action_id
+    assert a.action_id != Start("j", 2, ("a",), False, {"a": R}, 0.0).action_id
+    assert a.action_id != Start("j", 1, ("a",), True, {"a": R}, 0.0).action_id
     assert MarkStable("j", 1, {"a": R}).action_id != UpdateReservation("j", 1, {"a": R}).action_id
 
 
@@ -158,3 +161,15 @@ def test_config_defaults_match_spec() -> None:
 def test_config_validation(kwargs: dict[str, object], exc: type[Exception]) -> None:
     with pytest.raises(exc):
         Config(**kwargs)  # type: ignore[arg-type]
+
+
+def test_warning_keys_are_distinct_per_subject() -> None:
+    warnings = [a.warning for a in ALL_ACTIONS if isinstance(a, Warn)]
+    keys = [warning_key(w) for w in warnings]
+    assert len(set(keys)) == len(keys)
+    assert warning_key(UncleanStop("j", 1)) != warning_key(UncleanStop("j", 2))
+
+
+def test_config_stable_requires_epoch_must_be_bool() -> None:
+    with pytest.raises(TypeError, match="stable_requires_epoch"):
+        Config(stable_requires_epoch=1)  # type: ignore[arg-type]

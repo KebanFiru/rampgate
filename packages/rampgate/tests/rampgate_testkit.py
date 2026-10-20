@@ -7,8 +7,10 @@ from collections.abc import Iterable, Mapping
 from rampgate import (
     CancelRequested,
     Config,
+    Decision,
     Device,
     ExitKind,
+    FifoPolicy,
     IgnoreReason,
     Job,
     JobExited,
@@ -19,12 +21,15 @@ from rampgate import (
     JobSubmitted,
     MarkStable,
     Message,
+    OrderingPolicy,
     PreemptRequested,
     Resources,
+    Snapshot,
     Start,
     State,
     Stop,
     StopReason,
+    decide,
     reduce,
 )
 
@@ -58,16 +63,18 @@ class Driver:
         self,
         job_id: str = "j",
         placement: Mapping[str, Resources | None] | None = None,
+        *,
+        t: float | None = None,
         **kw: object,
     ) -> Driver:
         job = Job(job_id, placement if placement is not None else {GPU: None}, **kw)  # type: ignore[arg-type]
-        return self(JobSubmitted(job))
+        return self(JobSubmitted(job, t))
 
     def start_action(self, job_id: str = "j", free: Mapping[str, Resources] | None = None) -> Start:
         rt = self.rt(job_id)
         devices = rt.job.devices
         admitted = free if free is not None else {d: Resources() for d in devices}
-        return Start(job_id, rt.attempt, devices, rt.has_run, admitted)
+        return Start(job_id, rt.attempt, devices, rt.has_run, admitted, issued_at=0.0)
 
     def start(self, job_id: str = "j", free: Mapping[str, Resources] | None = None) -> Driver:
         return self(self.start_action(job_id, free))
@@ -80,11 +87,17 @@ class Driver:
         t: float,
         job_id: str = "j",
         device: str = GPU,
+        *,
         steps: int | None = None,
         attempt: int | None = None,
+        epoch: int | None = None,
         **usage: float,
     ) -> Driver:
-        return self(JobObserved(job_id, device, t, Resources(usage), steps, attempt))
+        return self(
+            JobObserved(
+                job_id, device, t, Resources(usage), steps=steps, epoch=epoch, attempt=attempt
+            )
+        )
 
     def exited(
         self,
@@ -137,3 +150,18 @@ class Driver:
         if target is JobState.FAILED:
             return self.exited(ExitKind.FAILURE, job_id)
         raise AssertionError(target)
+
+
+def decide_on(
+    d: Driver,
+    now: float,
+    policy: OrderingPolicy | None = None,
+    estimates: Mapping[str, Mapping[str, Resources | None]] | None = None,
+) -> Decision:
+    """Run ``decide`` on the driver's state (estimates given per job and device)."""
+    snapshot = Snapshot(d.state, estimates or {})
+    return decide(snapshot, now, d.config, policy or FifoPolicy(strict=False))
+
+
+def apply(d: Driver, decision: Decision) -> Driver:
+    return d(*decision.actions)

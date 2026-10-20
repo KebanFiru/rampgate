@@ -83,7 +83,7 @@ class ReducerMachine(RuleBasedStateMachine):
         if active:
             job = data.draw(st.sampled_from(active))
             dev = data.draw(st.sampled_from(self.d.rt(job).job.devices))
-            self.d.observe(self.tick(dt), job, dev, steps, vram=vram)
+            self.d.observe(self.tick(dt), job, dev, steps=steps, vram=vram)
 
     @rule(dev=st.sampled_from([GPU, GPU1]), dt=st.floats(0.1, 50), used=st.integers(0, 150))
     def device_observed(self, dev: str, dt: float, used: int) -> None:

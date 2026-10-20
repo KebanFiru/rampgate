@@ -1,10 +1,13 @@
 """Every lifecycle transition of SPEC §3.4, valid and invalid."""
 
+from dataclasses import replace
+
 import pytest
 
 from rampgate import (
     UNSET,
     CancelRequested,
+    CapacityExceeded,
     Config,
     Device,
     DeviceAdded,
@@ -12,6 +15,7 @@ from rampgate import (
     ExitKind,
     Fail,
     FailReason,
+    ForeignUsageHigh,
     GroupCompleted,
     GroupOutcome,
     HistoryRecord,
@@ -24,8 +28,10 @@ from rampgate import (
     JobSubmitted,
     JobUpdated,
     MarkStable,
+    Overcommitted,
     Paused,
     PreemptRequested,
+    QueueStopped,
     Requeue,
     RequeueReason,
     Resources,
@@ -35,8 +41,10 @@ from rampgate import (
     Stop,
     StopReason,
     Unpaused,
+    Warn,
     drain,
     reduce,
+    warning_key,
 )
 from rampgate_testkit import GPU, GPU1, Driver, gpus
 
@@ -106,16 +114,16 @@ def test_start_from_preempted_raises() -> None:
 def test_start_with_wrong_placement_raises() -> None:
     d = Driver(gpus(GPU, GPU1)).submit()
     with pytest.raises(InvalidTransition, match="placement"):
-        d(Start("j", 1, (GPU1,), False, {}))
+        d(Start("j", 1, (GPU1,), False, {}, 0.0))
 
 
 def test_start_future_attempt_raises_and_stale_is_noop() -> None:
     d = Driver().submit()
     with pytest.raises(InvalidTransition, match="future"):
-        d(Start("j", 2, (GPU,), False, {}))
+        d(Start("j", 2, (GPU,), False, {}, 0.0))
     d = Driver().to(JobState.WARMING).exited(ExitKind.OOM)
     before = d.state
-    d(Start("j", 1, (GPU,), False, {}))
+    d(Start("j", 1, (GPU,), False, {}, 0.0))
     assert d.state == before
 
 
@@ -482,14 +490,14 @@ def test_job_updated_unset_sentinel() -> None:
 def test_replayed_start_of_finished_attempt_is_noop(state: JobState) -> None:
     d = Driver().to(state)
     before = d.state
-    d(Start("j", 1, (GPU,), False, {}))
+    d(Start("j", 1, (GPU,), False, {}, 0.0))
     assert d.state == before
 
 
 def test_cancelled_pending_rejects_start() -> None:
     d = Driver().to(JobState.CANCELLED)
     with pytest.raises(InvalidTransition, match="only a PENDING"):
-        d(Start("j", 1, (GPU,), False, {}))
+        d(Start("j", 1, (GPU,), False, {}, 0.0))
 
 
 def test_cancelled_pending_rejects_started() -> None:
@@ -514,10 +522,13 @@ def test_device_added_and_removed() -> None:
     assert d.ignored == [IgnoreReason.DUPLICATE]
     with pytest.raises(InvalidTransition, match="different content"):
         d(DeviceAdded(Device(GPU1, Resources(vram=9))))
-    d(DeviceRemoved(GPU1))
+    d(DeviceRemoved(GPU1), DeviceRemoved(GPU1))
     assert GPU1 not in d.state.devices
+    assert d.ignored == [IgnoreReason.DUPLICATE, IgnoreReason.DUPLICATE]
     with pytest.raises(InvalidTransition, match="unknown device"):
-        d(DeviceRemoved(GPU1))
+        d(DeviceRemoved("never-added"))
+    d(DeviceAdded(dev))
+    assert d.state.removed_devices == frozenset()
 
 
 def test_device_removed_in_use_raises() -> None:
@@ -539,8 +550,43 @@ def test_clear_only_actions_drain_the_outbox() -> None:
     d(fail)
     assert d.state.outbox == ()
     before = d.state
-    d(fail, GroupCompleted("g", GroupOutcome.OK))
+    d(fail)
     assert d.state == before
+
+
+def test_group_completed_is_recorded_and_reopened_by_new_jobs() -> None:
+    done = GroupCompleted("g", GroupOutcome.OK)
+    d = Driver()(done, done)
+    assert d.state.completed_groups == {"g"}
+    d.submit("late", group="g")
+    assert d.state.completed_groups == frozenset()
+    d(done).submit("other", group="h")(JobUpdated("other", group="g"))
+    assert d.state.completed_groups == frozenset()
+
+
+def test_warn_records_key_and_queue_stopped_pauses() -> None:
+    warn = Warn(QueueStopped("g", "j"))
+    d = Driver()
+    d.state = replace(d.state, outbox=(warn,))
+    d(warn)
+    assert d.state.outbox == ()
+    assert d.state.paused
+    assert d.state.warned == {warning_key(warn.warning)}
+
+
+def test_warned_keys_are_pruned_when_their_condition_ends() -> None:
+    d = Driver().submit("j")
+    ce = Warn(CapacityExceeded(None, GPU, Resources(vram=1), Resources(), "j"))
+    other = Warn(ForeignUsageHigh(GPU, Resources(vram=1), "x"))
+    d(ce, other)
+    d.start("j")
+    assert d.state.warned == {warning_key(other.warning)}
+    d.started("j").observe(1.0, "j", vram=10).stable("j")
+    oc = Warn(Overcommitted(GPU, Resources(vram=200), Resources(vram=100)))
+    d(oc)
+    assert warning_key(oc.warning) in d.state.warned
+    d.exited(ExitKind.SUCCESS, "j")
+    assert d.state.warned == {warning_key(other.warning)}
 
 
 def test_drain_takes_ignored_and_history() -> None:
