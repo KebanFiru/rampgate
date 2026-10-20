@@ -160,14 +160,19 @@ class _Tick:
 
 
 def decide(snapshot: Snapshot, now: float, config: Config, policy: OrderingPolicy) -> Decision:
-    """Pure: the same snapshot, ``now``, config and policy always give the same decision."""
+    """Pure: the same snapshot, ``now``, config and policy always give the same decision.
+
+    ``policy.head_of_line_blocking`` defaults to False and ``policy.queue_stops``
+    to "none" when a duck-typed policy does not define them.
+    """
     tick = _Tick(snapshot, now, config)
     for action in snapshot.state.outbox:
         tick.emit(action)
     _start_timeouts(tick)
     _stops(tick)
     _mark_stable(tick)
-    for group, job_id in policy.queue_stops(tick.state):
+    queue_stops = getattr(policy, "queue_stops", None)
+    for group, job_id in queue_stops(tick.state) if queue_stops is not None else ():
         tick.warn(QueueStopped(group, job_id))
     _admit(tick, policy)
     _overcommit(tick)
@@ -217,7 +222,7 @@ def _admit(tick: _Tick, policy: OrderingPolicy) -> None:
     loads = device_loads(tick.state, tick.now, tick.config)
     warming = {d: load.warming_job for d, load in loads.items() if load.warming_job is not None}
     held: dict[DeviceId, JobId] = {}
-    blocking = policy.head_of_line_blocking
+    blocking = bool(getattr(policy, "head_of_line_blocking", False))
 
     for job_id in list(policy.candidates(tick.state, tick.now)):
         rt = tick.state.jobs.get(job_id)

@@ -81,7 +81,9 @@ class SimExecutor:
     def _counters(self, job_id: JobId, elapsed: float) -> tuple[int, int | None]:
         workload = self.workloads[job_id]
         before = 0.0 if self.reset_counters_on_resume else self.progress.get(job_id, 0.0)
-        steps = math.floor(workload.steps_per_s * (before + elapsed))
+        steps = math.floor(workload.steps_per_s * before) + math.floor(
+            workload.steps_per_s * elapsed
+        )
         epoch = workload.epoch(elapsed)
         if epoch is not None and not self.reset_counters_on_resume:
             epoch += _epochs(workload, self.progress.get(job_id, 0.0))
