@@ -277,3 +277,27 @@ def test_engine_apply_routes_commands_and_facts() -> None:
     e.tick(0.0)
     e.apply(JobStarted("a", 1, 1.0))
     assert e.state.jobs["a"].state is JobState.WARMING
+
+
+def test_stop_already_emitted_is_not_emitted_again_after_load() -> None:
+    """Documented in docs/reconciliation.md: the caller re-sends it for a running container."""
+    e = engine()
+    e.submit(Job("a", {GPU: None}))
+    e.tick(0.0)
+    e.on_started("a", 1, 1.0)
+    e.preempt("a")
+    assert [type(a).__name__ for a in e.tick(2.0).actions] == ["Stop"]
+    back = Engine.load(json.loads(json.dumps(e.dump())), policy=FifoPolicy())
+    assert back.state.jobs["a"].state is JobState.STOPPING
+    assert back.unreconciled() == ["a"]
+    assert back.tick(3.0).actions == ()
+
+
+def test_stop_request_not_yet_ticked_survives_load() -> None:
+    e = engine()
+    e.submit(Job("a", {GPU: None}))
+    e.tick(0.0)
+    e.on_started("a", 1, 1.0)
+    e.preempt("a")
+    back = Engine.load(json.loads(json.dumps(e.dump())), policy=FifoPolicy())
+    assert [type(a).__name__ for a in back.tick(2.0).actions] == ["Stop"]

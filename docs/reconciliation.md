@@ -11,8 +11,14 @@ were killed. **Reconciliation** is how you tell the engine what happened.
 import json
 
 with open("rampgate.json", "w") as f:
-    json.dump(engine.dump(), f)        # call between ticks, as often as you like
+    json.dump(engine.dump(), f)
 ```
+
+Persist **after** your executor has carried out the actions of a tick. `tick`
+already counts its actions as applied (a `Start` makes the job STARTING, a `Stop`
+makes it STOPPING), so a dump taken between `tick` and executing its actions
+records work that may never have happened. Section 3 covers the one case where
+that matters.
 
 The dump is versioned (`"format": "rampgate.engine"`, `"schema_version"`) and
 contains the whole state, including actions and history records that were not
@@ -46,7 +52,17 @@ for job_id in engine.unreconciled():
     elif container.running:
         engine.on_started(job_id, rt.attempt, t=container.started_at)  # no-op if already known
         # usage samples (engine.observe) will follow from your probes
+        if rt.state is JobState.STOPPING:
+            # The Stop may never have reached the container: send it again.
+            executor.apply(Stop(job_id, rt.attempt, rt.stop_intent, config.preempt_grace_s))
 ```
+
+**STOPPING jobs need care.** The engine never emits a `Stop` twice: once it is
+reduced, the job is STOPPING and waits for its exit. If your process died after
+`tick` but before the executor sent the stop, the container keeps running. So for
+an unreconciled STOPPING job whose container still runs, send the stop again
+yourself, as above. Its `action_id` is deterministic, so an executor that applies
+actions idempotently can safely see it twice.
 
 A job leaves `unreconciled()` as soon as any fact about it is applied: an
 `on_started`, an `on_exited` (including `LOST`), or a usage observation for its
@@ -62,8 +78,9 @@ What the engine does with each answer:
 | an observation of the current attempt | the job simply continues |
 | nothing, for a job that was STARTING | after `start_timeout_s` it gets `Requeue(START_TIMEOUT)` |
 
-A pending `Stop` request survives the restart: the next `tick` emits the `Stop`
-again if it had not been reduced yet, and exits still follow the STOPPING table.
+A stop *request* (`preempt` / `cancel`) that no tick had turned into a `Stop` yet
+survives the restart: the next `tick` emits the `Stop`. Exits of stopping jobs
+still follow the STOPPING table.
 
 ## 4. Continue
 
