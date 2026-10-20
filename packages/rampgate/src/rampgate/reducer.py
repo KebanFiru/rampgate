@@ -471,7 +471,7 @@ def _oom(state: State, rt: JobRuntime, ev: JobExited, config: Config) -> State:
 def _lost(state: State, rt: JobRuntime, config: Config) -> State:
     """An involuntary preemption: no OOM accounting, no history (the peak is incomplete)."""
     rt = replace(rt, lost_count=rt.lost_count + 1)
-    if rt.lost_count >= config.max_lost_retries:
+    if rt.lost_count > config.max_lost_retries:
         state = _emit(state, Fail(rt.id, rt.attempt, FailReason.LOST_RETRIES_EXHAUSTED))
         return _put(state, _end_attempt(rt, JobState.FAILED))
     rt = _requeue(rt)

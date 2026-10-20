@@ -166,7 +166,7 @@ class ReducerMachine(RuleBasedStateMachine):
             assert rt.attempt >= self.max_attempt.get(job, 1)
             self.max_attempt[job] = rt.attempt
             assert rt.oom_count <= CFG.max_oom_retries + 1
-            assert rt.lost_count <= CFG.max_lost_retries
+            assert rt.lost_count <= CFG.max_lost_retries + 1
             if rt.state is JobState.STOPPING:
                 assert rt.stop_intent is not None
             if rt.state not in ACTIVE_STATES:

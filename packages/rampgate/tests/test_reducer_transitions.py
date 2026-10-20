@@ -271,12 +271,17 @@ def test_lost_while_stopping_follows_stop_intent(reason: StopReason, end: JobSta
 
 def test_lost_retries_are_bounded() -> None:
     d = Driver(config=Config(max_lost_retries=3)).submit()
-    for attempt in range(1, 3):
+    for attempt in range(1, 4):
         d.start().started().exited(ExitKind.LOST)
         assert (d.rt().state, d.rt().attempt) == (JobState.PENDING, attempt + 1)
     d.start().started().exited(ExitKind.LOST)
     assert d.rt().state is JobState.FAILED
-    assert d.state.outbox[-1] == Fail("j", 3, FailReason.LOST_RETRIES_EXHAUSTED)
+    assert d.state.outbox[-1] == Fail("j", 4, FailReason.LOST_RETRIES_EXHAUSTED)
+
+
+def test_zero_lost_retries_fails_first_lost() -> None:
+    d = Driver(config=Config(max_lost_retries=0)).to(JobState.WARMING).exited(ExitKind.LOST)
+    assert d.rt().state is JobState.FAILED
 
 
 def test_lost_counter_resets_after_stable() -> None:
