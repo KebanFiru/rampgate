@@ -1,5 +1,7 @@
 """Stale, duplicate and out-of-order events (SPEC §4)."""
 
+from dataclasses import replace
+
 import pytest
 
 from rampgate import (
@@ -130,9 +132,8 @@ def test_replaying_keyed_events_only_grows_the_ignored_log() -> None:
     d.start()
     for ev in events[5:]:
         d(ev)
-    final_jobs, final_devices = d.state.jobs, d.state.devices
+    final = replace(d.state, ignored_events=())
     for n in range(len(events) + 1):
         for ev in events[:n]:
             d(ev)
-        assert d.state.jobs == final_jobs
-        assert d.state.devices == final_devices
+        assert replace(d.state, ignored_events=()) == final

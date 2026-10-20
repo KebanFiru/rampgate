@@ -25,7 +25,8 @@ def is_stable(rt: JobRuntime, now: float, config: Config) -> bool:
       steps, it made ``stable_min_steps`` steps in this attempt; or
     - ``now - warm_start >= max_warmup_s``.
 
-    Jobs that never report steps are judged on the time conditions alone.
+    Jobs that never reported steps (in any attempt) are judged on the time
+    conditions alone.
     """
     if rt.state is not JobState.WARMING or rt.warm_start is None:
         return False

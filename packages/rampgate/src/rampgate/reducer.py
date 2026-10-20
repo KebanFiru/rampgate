@@ -337,6 +337,7 @@ def _job_observed(state: State, ev: JobObserved, config: Config) -> State:
         last_peak_growth_t=growth_t,
         steps_baseline=baseline,
         steps_latest=latest,
+        reports_steps=rt.reports_steps or ev.steps is not None,
     )
 
     reserved = rt.reservation.get(dev)
@@ -456,7 +457,8 @@ def _learn_from_oom(
             if prev[dim] > 0 and prev[dim] >= cap[dim] and rt.admitted_alone.get(d, False):
                 exceeds_capacity = True
         learned[d] = Resources(new)
-        records.append(HistoryRecord(rt.id, d, Resources(lower), lower_bound=True))
+        if any(lower.values()):  # a zero bound would turn "unknown" into "known zero"
+            records.append(HistoryRecord(rt.id, d, Resources(lower), lower_bound=True))
     return frozen_map(learned), records, exceeds_capacity
 
 
@@ -478,7 +480,9 @@ def _oom(state: State, rt: JobRuntime, ev: JobExited, config: Config) -> State:
 def _lost(state: State, rt: JobRuntime, config: Config) -> State:
     """An involuntary preemption: no OOM accounting, no history (the peak is incomplete)."""
     rt = replace(rt, lost_count=rt.lost_count + 1)
-    if rt.lost_count > config.max_lost_retries:
+    # SPEC §3.4: fail *after* max_lost_retries consecutive LOST exits (unlike OOM, which
+    # fails once the count exceeds max_oom_retries).
+    if rt.lost_count >= config.max_lost_retries:
         state = _emit(state, Fail(rt.id, rt.attempt, FailReason.LOST_RETRIES_EXHAUSTED))
         return _put(state, _end_attempt(rt, JobState.FAILED))
     rt = _requeue(rt)

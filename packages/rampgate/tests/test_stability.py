@@ -98,7 +98,7 @@ def test_cumulative_and_reset_counters_stabilize_at_same_time() -> None:
 def test_steps_reset_by_start() -> None:
     d = warming().observe(1.0, vram=10, steps=5).observe(2.0, vram=10, steps=9)
     d.exited(ExitKind.OOM).start()
-    assert d.rt().steps_in_attempt is None
+    assert d.rt().steps_in_attempt == 0  # reset, and still required (reports_steps)
     assert d.rt().peak == {}
 
 
@@ -107,3 +107,11 @@ def test_is_peak_growth() -> None:
     assert not is_peak_growth(Resources(vram=100), Resources(vram=102), 0.02)
     assert is_peak_growth(Resources(vram=100), Resources(vram=102.1), 0.02)
     assert is_peak_growth(Resources(vram=100), Resources(vram=100, ram=1), 0.02)
+
+
+def test_step_reporting_job_keeps_needing_steps_after_resume() -> None:
+    d = warming().observe(1.0, vram=10, steps=100).exited(ExitKind.LOST, t=2.0)
+    d.start().started(t=10.0).observe(11.0, vram=10)  # a usage-only sample, no steps
+    assert d.rt().steps_in_attempt == 0
+    assert not is_stable(d.rt(), 500.0, CFG)
+    assert is_stable(d.rt(), 610.0, CFG)

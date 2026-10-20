@@ -162,6 +162,8 @@ class JobRuntime:
     # Estimate learned from OOMs, per device. Empty = nothing learned yet.
     learned: Mapping[DeviceId, Resources] = field(default_factory=frozen_map)
     stop_intent: StopReason | None = None
+    # Sticky: the job reported steps in some attempt, so Rule S keeps requiring them.
+    reports_steps: bool = False
     # (attempt, kind) of lifecycle facts already applied, for deduplication.
     applied: frozenset[tuple[int, str]] = frozenset()
     # Time of the last exit; observations older than it belong to a past attempt.
@@ -185,7 +187,7 @@ class JobRuntime:
     @property
     def steps_in_attempt(self) -> int | None:
         if self.steps_latest is None or self.steps_baseline is None:
-            return None
+            return 0 if self.reports_steps else None
         return self.steps_latest - self.steps_baseline
 
     def prev_estimate(self, device_id: DeviceId) -> Resources | None:

@@ -290,16 +290,16 @@ def test_lost_while_stopping_follows_stop_intent(reason: StopReason, end: JobSta
 
 def test_lost_retries_are_bounded() -> None:
     d = Driver(config=Config(max_lost_retries=3)).submit()
-    for attempt in range(1, 4):
+    for attempt in range(1, 3):
         d.start().started().exited(ExitKind.LOST)
         assert (d.rt().state, d.rt().attempt) == (JobState.PENDING, attempt + 1)
-    d.start().started().exited(ExitKind.LOST)
+    d.start().started().exited(ExitKind.LOST)  # the 3rd consecutive LOST
     assert d.rt().state is JobState.FAILED
-    assert d.state.outbox[-1] == Fail("j", 4, FailReason.LOST_RETRIES_EXHAUSTED)
+    assert d.state.outbox[-1] == Fail("j", 3, FailReason.LOST_RETRIES_EXHAUSTED)
 
 
 def test_lost_counter_resets_after_stable() -> None:
-    d = Driver(config=Config(max_lost_retries=1)).submit()
+    d = Driver(config=Config(max_lost_retries=2)).submit()
     d.start().started().exited(ExitKind.LOST)
     d.start().started().observe(1.0, vram=1).stable().exited(ExitKind.LOST)
     assert d.rt().state is JobState.PENDING

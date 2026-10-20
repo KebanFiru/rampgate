@@ -133,3 +133,8 @@ def test_oom_in_dimension_the_device_lacks_still_grows() -> None:
         .exited(ExitKind.OOM, oom_dims=("ram",))
     )
     assert d.rt().learned[GPU] == Resources(ram=10.0)
+
+
+def test_zero_lower_bound_is_not_recorded() -> None:
+    d = Driver().submit().start().exited(ExitKind.OOM)  # forced/empty admission, no data
+    assert d.state.history_records == ()
