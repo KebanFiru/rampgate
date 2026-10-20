@@ -1,0 +1,53 @@
+#!/usr/bin/env bash
+# Run the dev/CI toolchain inside Docker; nothing is installed on the host.
+#
+#   ./dev build                 build the dev image
+#   ./dev ci [3.11|3.12|3.13|all]   lint, type-check and test (default: all)
+#   ./dev zero-deps             verify the core has zero runtime dependencies
+#   ./dev shell [version]       interactive shell with a synced venv
+#   ./dev run <cmd...>          run an arbitrary command in the container
+set -euo pipefail
+
+IMAGE=rampgate-dev:latest
+ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+
+in_container() {
+    local tty=()
+    [[ -t 0 && -t 1 ]] && tty=(-it)
+    docker run --rm "${tty[@]}" \
+        --user "$(id -u):$(id -g)" \
+        -v "$ROOT:/work:Z" \
+        -v rampgate-uv-cache:/cache \
+        "$IMAGE" "$@"
+}
+
+cmd="${1:-ci}"
+shift || true
+
+case "$cmd" in
+    build)
+        docker build -f "$ROOT/docker/dev.Dockerfile" -t "$IMAGE" "$ROOT/docker"
+        ;;
+    ci)
+        versions=("${1:-all}")
+        [[ "${versions[0]}" == all ]] && versions=(3.11 3.12 3.13)
+        for v in "${versions[@]}"; do
+            in_container bash scripts/ci.sh "$v"
+        done
+        ;;
+    zero-deps)
+        in_container bash scripts/check_zero_deps.sh
+        ;;
+    shell)
+        v="${1:-3.13}"
+        in_container bash -c "export UV_PROJECT_ENVIRONMENT=/tmp/venv-$v; \
+            uv sync --all-packages --python $v -q && exec bash"
+        ;;
+    run)
+        in_container "$@"
+        ;;
+    *)
+        echo "unknown command: $cmd" >&2
+        exit 2
+        ;;
+esac

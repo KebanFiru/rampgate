@@ -1,0 +1,48 @@
+# uv workspace root: dev tooling only, never published.
+
+[tool.uv.workspace]
+members = ["packages/*"]
+
+[dependency-groups]
+dev = [
+    "hypothesis>=6.100",
+    "mypy>=1.11",
+    "pytest>=8.0",
+    "pytest-cov>=5.0",
+    "ruff>=0.6",
+]
+
+[tool.ruff]
+line-length = 100
+target-version = "py311"
+src = ["packages/*/src", "packages/*/tests"]
+extend-exclude = ["*.md"]  # never reformat code blocks in the spec/docs
+
+[tool.ruff.lint]
+select = ["E", "F", "W", "I", "B", "UP", "SIM", "RUF", "PL", "PT", "C4", "RET"]
+ignore = [
+    "PLR0911", # many returns: transition tables read better flat
+    "PLR0912",
+    "PLR0913",
+    "PLR2004", # magic values are fine in tests and spec-defined thresholds
+    "PT011",   # broad pytest.raises(ValueError) is fine; messages are tested where they matter
+]
+
+[tool.mypy]
+strict = true
+python_version = "3.11"
+files = ["packages/rampgate/src", "packages/rampgate-nvml/src", "packages/rampgate-psutil/src", "packages/rampgate-docker/src", "packages/rampgate/tests"]
+
+[tool.pytest.ini_options]
+addopts = "--import-mode=importlib"
+testpaths = ["packages"]
+
+[tool.coverage.run]
+source = ["rampgate"]
+branch = true
+
+[tool.coverage.report]
+fail_under = 95
+show_missing = true
+skip_covered = true
+exclude_also = ["if TYPE_CHECKING:", "raise AssertionError", "@overload", "\\.\\.\\."]
