@@ -244,6 +244,13 @@ def check_exits(prev: State, tick: Tick) -> None:
                     )
 
 
+def check_explained(tick: Tick) -> None:
+    """SPEC §3.7: every waiting job gets an explanation (built-in policies)."""
+    for rt in tick.after.jobs.values():
+        if rt.state in (JobState.PENDING, JobState.PREEMPTED):
+            assert rt.id in tick.decision.explanations, rt.id
+
+
 def check_groups(state: State) -> None:
     """I10: a PREEMPTED job keeps its group open."""
     for rt in state.jobs.values():
@@ -262,6 +269,7 @@ def test_invariants_hold_in_simulation(case: tuple[Scenario, OrderingPolicy]) ->
         check_exits(prev, tick)
         check_starts(tick, policy)
         check_purity(tick, policy)
+        check_explained(tick)
         for state in (tick.snapshot.state, tick.after):
             check_i1(state)
             check_groups(state)
@@ -272,6 +280,14 @@ def test_invariants_hold_in_simulation(case: tuple[Scenario, OrderingPolicy]) ->
                         assert reservations[key].fits_in(r)
                     reservations[key] = r
         prev = tick.after
+
+    if any(rt.attempt > 1 for rt in trace.final.jobs.values()):  # I14
+        reset = simulate(
+            scenario, policy, config=CFG, max_time=400.0, reset_counters_on_resume=True
+        )
+        assert [t.decision.actions for t in reset.ticks] == [
+            t.decision.actions for t in trace.ticks
+        ]
 
 
 # -- I11 / I11b -----------------------------------------------------------------------------------

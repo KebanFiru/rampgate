@@ -385,3 +385,22 @@ def test_decide_tolerates_odd_custom_policies() -> None:
     dec = decide_on(d, 1.0, _OddPolicy())
     assert starts(dec) == ["a"]
     assert "left-out" not in dec.explanations
+
+
+class _DuckPolicy:
+    """Implements only the three methods of the original SPEC protocol."""
+
+    def candidates(self, view: object, now: float) -> list[str]:
+        return ["b", "a"]
+
+    def explain_blocked(self, view: object, job_id: str) -> None:
+        return None
+
+    def completed_groups(self, view: object) -> list[tuple[str, GroupOutcome]]:
+        return []
+
+
+def test_duck_typed_policy_defaults_to_no_blocking_and_no_queue_stops() -> None:
+    d = Driver(gpus(GPU, GPU1)).submit("a", {GPU1: None}).submit("b", {GPU: Resources(vram=500)})
+    dec = decide_on(d, 0.0, _DuckPolicy())  # type: ignore[arg-type]
+    assert starts(dec) == ["a"]
