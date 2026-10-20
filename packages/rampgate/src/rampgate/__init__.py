@@ -26,6 +26,7 @@ from rampgate.actions import (
 )
 from rampgate.config import Config
 from rampgate.decide import Decision, DeviceLoad, decide, device_loads
+from rampgate.engine import Engine
 from rampgate.estimators import (
     Estimator,
     HistoryEstimator,
@@ -93,6 +94,7 @@ from rampgate.policies import (
 )
 from rampgate.reducer import IgnoredEvent, IgnoreReason, InvalidTransition, Message, drain, reduce
 from rampgate.resources import GiB, KiB, MiB, Number, Resources, TiB
+from rampgate.serialization import UnsupportedSchema, dump_state, load_state
 from rampgate.stability import is_peak_growth, is_stable
 
 __version__ = "0.1.0.dev0"
@@ -117,6 +119,7 @@ __all__ = [
     "DeviceObserved",
     "DeviceRemoved",
     "DeviceState",
+    "Engine",
     "EnginePaused",
     "Estimator",
     "Event",
@@ -178,6 +181,7 @@ __all__ = [
     "UncleanStop",
     "UnknownEstimateBlocked",
     "Unpaused",
+    "UnsupportedSchema",
     "UpdateReservation",
     "WaitingForWarmup",
     "Warn",
@@ -188,10 +192,12 @@ __all__ = [
     "decide",
     "device_loads",
     "drain",
+    "dump_state",
     "is_edge_triggered",
     "is_peak_growth",
     "is_stable",
     "key_id",
+    "load_state",
     "reduce",
     "resolve_estimates",
     "warning_key",

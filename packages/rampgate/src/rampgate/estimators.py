@@ -3,7 +3,7 @@
 from __future__ import annotations
 
 from collections.abc import Callable, Iterable, Mapping
-from typing import Literal, Protocol
+from typing import Any, Literal, Protocol
 
 from rampgate.model import (
     TERMINAL_STATES,
@@ -61,6 +61,17 @@ class InMemoryHistoryStore:
     def put(self, key: str, device_kind: str, peak: Resources, *, lower_bound: bool) -> None:
         old = self._data.get((key, device_kind))
         self._data[(key, device_kind)] = peak if old is None else old.max(peak)
+
+    def to_json(self) -> list[list[Any]]:
+        """``[[key, device_kind, peak], ...]``, sorted, for ``json.dumps``."""
+        return [[k, kind, peak.to_json()] for (k, kind), peak in sorted(self._data.items())]
+
+    @classmethod
+    def from_json(cls, data: Iterable[Any]) -> InMemoryHistoryStore:
+        store = cls()
+        for key, kind, peak in data:
+            store._data[(str(key), str(kind))] = Resources.from_json(peak)
+        return store
 
 
 class HistoryEstimator:
