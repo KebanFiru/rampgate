@@ -17,6 +17,7 @@ in_container() {
     [[ -t 0 && -t 1 ]] && tty=(-it)
     docker run --rm "${tty[@]}" \
         --user "$(id -u):$(id -g)" \
+        -e HYPOTHESIS_PROFILE="${HYPOTHESIS_PROFILE:-ci}" \
         -v "$ROOT:/work:Z" \
         -v rampgate-uv-cache:/cache \
         "$IMAGE" "$@"

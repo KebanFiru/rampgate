@@ -1,0 +1,26 @@
+name: Nightly
+
+on:
+  schedule:
+    - cron: "17 3 * * *"
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  thorough:
+    name: hypothesis nightly profile (py${{ matrix.python }})
+    runs-on: ubuntu-latest
+    strategy:
+      fail-fast: false
+      matrix:
+        python: ["3.11", "3.13"]
+    env:
+      HYPOTHESIS_PROFILE: nightly
+    steps:
+      - uses: actions/checkout@v4
+      - name: Build dev image
+        run: ./dev build
+      - name: ruff, mypy --strict, pytest + coverage (nightly profile)
+        run: ./dev ci ${{ matrix.python }}
