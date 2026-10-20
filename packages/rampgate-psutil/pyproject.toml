@@ -1,0 +1,26 @@
+[project]
+name = "rampgate-psutil"
+version = "0.1.0.dev0"
+description = "Host RAM/CPU probe for rampgate (psutil)."
+readme = "README.md"
+license = "Apache-2.0"
+license-files = ["LICENSE"]
+requires-python = ">=3.11"
+dependencies = [
+    "rampgate>=0.1.0.dev0,<0.2",
+    "psutil>=5.9",
+]
+classifiers = [
+    "Programming Language :: Python :: 3",
+    "Typing :: Typed",
+]
+
+[build-system]
+requires = ["hatchling>=1.26"]
+build-backend = "hatchling.build"
+
+[tool.hatch.build.targets.wheel]
+packages = ["src/rampgate_psutil"]
+
+[tool.uv.sources]
+rampgate = { workspace = true }

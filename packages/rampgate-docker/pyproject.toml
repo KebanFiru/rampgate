@@ -1,0 +1,26 @@
+[project]
+name = "rampgate-docker"
+version = "0.1.0.dev0"
+description = "Docker executor, exit classification and event watcher for rampgate."
+readme = "README.md"
+license = "Apache-2.0"
+license-files = ["LICENSE"]
+requires-python = ">=3.11"
+dependencies = [
+    "rampgate>=0.1.0.dev0,<0.2",
+    "docker>=7.0",
+]
+classifiers = [
+    "Programming Language :: Python :: 3",
+    "Typing :: Typed",
+]
+
+[build-system]
+requires = ["hatchling>=1.26"]
+build-backend = "hatchling.build"
+
+[tool.hatch.build.targets.wheel]
+packages = ["src/rampgate_docker"]
+
+[tool.uv.sources]
+rampgate = { workspace = true }
