@@ -3,7 +3,7 @@
 from __future__ import annotations
 
 import json
-from dataclasses import dataclass
+from dataclasses import dataclass, replace
 from typing import Any
 
 import pytest
@@ -12,15 +12,19 @@ from hypothesis import strategies as st
 
 import rampgate.serialization as ser
 from rampgate import (
+    ACTIVE_STATES,
+    TERMINAL_STATES,
     Config,
     Device,
     Engine,
     ExitKind,
     FifoPolicy,
     HistoryEstimator,
+    HistoryRecord,
     InMemoryHistoryStore,
     InvalidTransition,
     Job,
+    JobExited,
     JobObserved,
     JobStarted,
     JobState,
@@ -31,17 +35,28 @@ from rampgate import (
     Requeue,
     RequeueReason,
     Resources,
+    StagePolicy,
     Start,
     StopReason,
+    Unreconciled,
     UnsupportedSchema,
     WaitingForWarmup,
+    Warn,
+    WarnCleared,
     dump_state,
     load_state,
 )
 from rampgate.serialization import MIGRATIONS, SCHEMA_VERSION, from_data, to_data
 from rampgate.sim import RampPlateau, Scenario, SimJob, simulate
 from rampgate_testkit import GPU, GPU1, Driver, examples, gpus
-from test_invariants import CFG, scenarios
+from test_invariants import (
+    CFG,
+    check_explained,
+    check_i1,
+    check_i16,
+    check_starts,
+    scenarios,
+)
 
 # -- I8: dump / load round trip ---------------------------------------------------------------
 
@@ -301,3 +316,147 @@ def test_stop_request_not_yet_ticked_survives_load() -> None:
     e.preempt("a")
     back = Engine.load(json.loads(json.dumps(e.dump())), policy=FifoPolicy())
     assert [type(a).__name__ for a in back.tick(2.0).actions] == ["Stop"]
+
+
+# -- confirm and Unreconciled warnings (L3 follow-up) -------------------------------------------
+
+
+def running_then_loaded(**config: Any) -> Engine:
+    e = engine(config=Config(**config))
+    e.submit(Job("a", {GPU: None}))
+    e.tick(0.0)
+    e.on_started("a", 1, 1.0)
+    e.tick(2.0)
+    return Engine.load(json.loads(json.dumps(e.dump())), policy=FifoPolicy(), config=e.config)
+
+
+def test_confirm_reconciles_and_checks_the_attempt() -> None:
+    back = running_then_loaded()
+    with pytest.raises(InvalidTransition, match="unknown job"):
+        back.confirm("ghost", 1)
+    with pytest.raises(InvalidTransition, match="current attempt is 1"):
+        back.confirm("a", 2)
+    back.confirm("a", 1)
+    assert back.unreconciled() == []
+
+
+def test_only_observations_naming_the_attempt_reconcile() -> None:
+    back = running_then_loaded()
+    back.observe(JobObserved("a", GPU, 3.0, Resources(vram=5)))
+    assert back.unreconciled() == ["a"]
+    back.observe(JobObserved("a", GPU, 4.0, Resources(vram=5), attempt=1))
+    assert back.unreconciled() == []
+
+
+def test_unreconciled_warning_after_grace_and_cleared_on_confirm() -> None:
+    back = running_then_loaded(reconcile_grace_s=60)
+    assert not [a for a in back.tick(10.0).actions if isinstance(a, Warn)]
+    assert not [a for a in back.tick(69.0).actions if isinstance(a, Warn)]
+    raised = back.tick(70.0).actions
+    assert Warn(Unreconciled("a", 1)) in raised
+    assert not [a for a in back.tick(500.0).actions if isinstance(a, Warn)]
+    assert back.state.jobs["a"].state in ACTIVE_STATES  # never declared LOST
+    assert back.state.jobs["a"].attempt == 1
+    back.confirm("a", 1)
+    assert WarnCleared("Unreconciled", ("a",)) in back.tick(501.0).actions
+
+
+# -- idempotent history (L3 follow-up) ---------------------------------------------
+
+
+def test_history_record_id() -> None:
+    record = HistoryRecord("j", GPU, Resources(vram=1), True, 3)
+    assert record.record_id == f"j:3:{GPU}:lower_bound"
+    assert HistoryRecord("j", GPU, Resources(), False, 3).record_id == f"j:3:{GPU}:peak"
+
+
+def test_crash_between_put_and_dump_applies_history_once() -> None:
+    store = InMemoryHistoryStore()
+    est = HistoryEstimator(store)
+    e = engine(estimator=est)
+    e.submit(Job("a", {GPU: None}, fingerprint=("m", "family")))
+    e.tick(0.0)
+    e.on_started("a", 1, 1.0)
+    e.observe(JobObserved("a", GPU, 2.0, Resources(vram=40), attempt=1))
+    e.on_exited("a", 1, ExitKind.SUCCESS, 3.0)
+    before_tick = json.dumps(e.dump())  # the history record is still in the state
+    e.tick(4.0)  # puts it into the store (once per fingerprint key)...
+    assert store.puts_applied == 2
+    # ...then the process crashes before the next dump: restart from the older one.
+    again = Engine.load(json.loads(before_tick), policy=FifoPolicy(), estimator=est)
+    again.tick(4.0)
+    assert store.puts_applied == 2
+    assert store.get("m", GPU) == Resources(vram=40)
+    copy = InMemoryHistoryStore.from_json(json.loads(json.dumps(store.to_json())))
+    copy.put("m", GPU, Resources(vram=99), lower_bound=False, record_id=f"a:1:{GPU}:peak")
+    assert copy.get("m", GPU) == Resources(vram=40)
+
+
+# -- restarts and downtime (L3 follow-up) ----------------------------------------------------------
+
+
+@settings(max_examples=examples(0.3))
+@given(scenarios(), st.data())
+def test_multiple_restarts_give_the_same_trace(
+    case: tuple[Scenario, OrderingPolicy], data: st.DataObject
+) -> None:
+    scenario, policy = case
+    whole = simulate(scenario, policy, config=CFG, max_time=400.0)
+    times = [t.now for t in whole.ticks]
+    at = data.draw(st.lists(st.sampled_from(times), min_size=1, max_size=3))
+    restarted = simulate(scenario, policy, config=CFG, max_time=400.0, restart_at=at)
+    assert len(restarted.dumps) == len(at)
+    assert [t.decision for t in restarted.ticks] == [t.decision for t in whole.ticks]
+    assert restarted.final == whole.final
+
+
+def test_restart_dump_can_hold_pending_outbox_actions() -> None:
+    job = SimJob(
+        Job("a", {GPU: None}),
+        RampPlateau(load_s=1, ramp_s=1, plateau=Resources(vram=150), duration_s=50),
+    )
+    scenario = Scenario((Device(GPU, Resources(vram=100)),), (job,))
+    whole = simulate(scenario, FifoPolicy())
+    oom_at = next(
+        t.now
+        for t in whole.ticks
+        for e in t.events
+        if isinstance(e, JobExited) and e.kind is ExitKind.OOM
+    )
+    restarted = simulate(scenario, FifoPolicy(), restart_at=oom_at)
+    (dump,) = restarted.dumps
+    assert load_state(json.loads(dump)["state"]).outbox  # a Requeue was waiting
+    assert [t.decision for t in restarted.ticks] == [t.decision for t in whole.ticks]
+
+
+@settings(max_examples=examples(0.3))
+@given(scenarios(), st.data())
+def test_restart_with_downtime_reconciles_and_finishes(
+    case: tuple[Scenario, OrderingPolicy], data: st.DataObject
+) -> None:
+    scenario, policy = case
+    if isinstance(policy, StagePolicy):  # no STOP_QUEUE: it pauses until a human unpauses
+        policy = StagePolicy(policy.groups_order, backfill=policy.backfill)
+    # No commands (a PREEMPTED job waits for a resume) and no foreign load: with a
+    # permanent foreign load, a job whose learned estimate reached the capacity can
+    # neither fit nor fail (an open question for Rule O, not a downtime issue).
+    scenario = replace(scenario, commands=(), foreign={})
+    start = float(data.draw(st.integers(1, 150)))
+    length = float(data.draw(st.integers(1, 120)))
+    trace = simulate(
+        scenario, policy, config=CFG, max_time=4000.0, downtime=[(start, start + length)]
+    )
+    raised: dict[str, bool] = {}
+    for tick in trace.ticks:
+        check_i1(tick.after)
+        check_starts(tick, policy)
+        check_explained(tick)
+        check_i16(tick, raised)
+    final = trace.final
+    stuck = {
+        j: (rt.state, rt.attempt, trace.ticks[-1].decision.explanations.get(j))
+        for j, rt in final.jobs.items()
+        if rt.state not in TERMINAL_STATES
+    }
+    assert not stuck, (stuck, trace.ticks[-1].now, final.devices, final.active_warnings)
+    assert len(final.jobs) == len(scenario.jobs)

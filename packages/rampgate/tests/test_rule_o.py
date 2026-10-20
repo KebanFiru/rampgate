@@ -4,7 +4,6 @@ import pytest
 
 from rampgate import (
     Config,
-    DeviceObserved,
     ExitKind,
     Fail,
     FailReason,
@@ -22,7 +21,7 @@ def test_oom_with_no_data_learns_from_admitted_free() -> None:
     d = Driver().submit().start(free={GPU: Resources(vram=60)}).exited(ExitKind.OOM)
     rt = d.rt()
     assert rt.learned == {GPU: Resources(vram=75.0)}
-    assert d.state.history_records == (HistoryRecord("j", GPU, Resources(vram=60), True),)
+    assert d.state.history_records == (HistoryRecord("j", GPU, Resources(vram=60), True, 1),)
     assert d.state.outbox == (Requeue("j", 2, {GPU: Resources(vram=75.0)}, RequeueReason.OOM),)
 
 
@@ -50,36 +49,41 @@ def test_oom_estimate_strictly_increases_until_capacity() -> None:
         last = est
         free = Resources()
     assert d.rt().state is JobState.FAILED
-    assert d.state.outbox[-1].reason is FailReason.EXCEEDS_DEVICE_CAPACITY  # type: ignore[union-attr]
+    assert d.state.outbox[-1].reason is FailReason.OOM_RETRIES_EXHAUSTED  # type: ignore[union-attr]
     assert last == 100
 
 
-def test_oom_at_capacity_alone_fails_immediately() -> None:
-    d = Driver().submit("j", {GPU: Resources(vram=100)}).start().exited(ExitKind.OOM)
+def test_oom_with_the_whole_device_free_fails_immediately() -> None:
+    d = Driver().submit().start(free={GPU: Resources(vram=100)}).exited(ExitKind.OOM)
     assert d.rt().state is JobState.FAILED
     assert d.state.outbox == (Fail("j", 1, FailReason.EXCEEDS_DEVICE_CAPACITY),)
 
 
-def test_oom_at_capacity_with_neighbour_requeues() -> None:
-    d = Driver().submit("other").start("other")
-    d.submit("j", {GPU: Resources(vram=100)}).start("j").exited(ExitKind.OOM, "j")
-    assert d.rt("j").state is JobState.PENDING
+@pytest.mark.parametrize(("free", "fails"), [(98.0, True), (97.9, False)])
+def test_whole_device_threshold_uses_foreign_tolerance(free: float, fails: bool) -> None:
+    d = Driver().submit().start(free={GPU: Resources(vram=free)}).exited(ExitKind.OOM)
+    assert (d.rt().state is JobState.FAILED) is fails
 
 
-def test_oom_at_capacity_with_foreign_usage_requeues() -> None:
-    d = Driver()(DeviceObserved(GPU, 0.0, Resources(vram=5)))
-    d.submit("j", {GPU: Resources(vram=100)}).start().exited(ExitKind.OOM)
-    assert d.rt().admitted_alone == {GPU: False}
+def test_capacity_fail_ignores_where_the_estimate_came_from() -> None:
+    # A hint of the full device, but admitted with half of it free: retry with growth.
+    d = Driver().submit("j", {GPU: Resources(vram=100)}, force=True)
+    d.start(free={GPU: Resources(vram=50)}).exited(ExitKind.OOM)
     assert d.rt().state is JobState.PENDING
-    d2 = Driver()(DeviceObserved(GPU, 0.0, Resources(vram=1)))
-    d2.submit("j", {GPU: Resources(vram=100)}).start().exited(ExitKind.OOM)
+    assert d.rt().learned[GPU] == Resources(vram=100)
+    # No hint, no history, but the whole device was free: fail.
+    d2 = Driver().submit().start(free={GPU: Resources(vram=100)}).exited(ExitKind.OOM)
     assert d2.rt().state is JobState.FAILED
 
 
-def test_foreign_usage_in_dimension_without_capacity_is_not_alone() -> None:
-    d = Driver()(DeviceObserved(GPU, 0.0, Resources(ram=1)))
-    d.submit().start()
-    assert d.rt().admitted_alone == {GPU: False}
+def test_capacity_fail_only_counts_the_oom_dimension() -> None:
+    cap = Resources(vram=100, ram=100)
+    d = Driver(gpus(cap=cap)).submit().start(free={GPU: Resources(vram=40, ram=100)})
+    d.exited(ExitKind.OOM, oom_dims=("vram",))
+    assert d.rt().state is JobState.PENDING
+    d2 = Driver(gpus(cap=cap)).submit().start(free={GPU: Resources(vram=40, ram=100)})
+    d2.exited(ExitKind.OOM, oom_dims=("ram",))
+    assert d2.rt().state is JobState.FAILED
 
 
 def test_oom_dims_limits_growth() -> None:

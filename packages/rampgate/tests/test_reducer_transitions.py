@@ -85,14 +85,7 @@ def test_start_moves_to_starting_and_records_admission() -> None:
     rt = d.rt()
     assert rt.state is JobState.STARTING
     assert rt.admitted_free == {GPU: Resources(vram=60)}
-    assert rt.admitted_alone == {GPU: True}
-
-
-def test_start_not_alone_with_other_active_job() -> None:
-    d = Driver().submit("a").start("a").submit("b").start("b")
-    assert d.rt("b").admitted_alone == {GPU: False}
-    d2 = Driver().to(JobState.SUCCEEDED, "a").submit("b").start("b")
-    assert d2.rt("b").admitted_alone == {GPU: True}
+    assert rt.starting_since == 0.0
 
 
 def test_start_twice_is_a_noop() -> None:
@@ -195,7 +188,7 @@ def test_exit_success_records_history_only_for_observed_devices() -> None:
     d = Driver(gpus(GPU, GPU1)).submit("j", {GPU: None, GPU1: None}).start().started()
     d.observe(1.0, device=GPU, vram=30).observe(2.0, device=GPU, vram=20)
     d.exited(ExitKind.SUCCESS)
-    assert d.state.history_records == (HistoryRecord("j", GPU, Resources(vram=30), False),)
+    assert d.state.history_records == (HistoryRecord("j", GPU, Resources(vram=30), False, 1),)
 
 
 @pytest.mark.parametrize("state", RUNNING)

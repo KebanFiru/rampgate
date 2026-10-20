@@ -93,8 +93,8 @@ def test_apply_history_feeds_success_and_oom_records() -> None:
     d = Driver().submit("j", fingerprint=("k",)).start(free={GPU: Resources(vram=40)})
     d.exited(ExitKind.OOM)
     state, _, history = drain(d.state)
-    assert history == (HistoryRecord("j", GPU, Resources(vram=40), True),)
+    assert history == (HistoryRecord("j", GPU, Resources(vram=40), True, 1),)
     apply_history(est, state, history)
     gpu = state.devices[GPU].device
     assert est.estimate(state.jobs["j"].job, gpu) == Resources(vram=40)
-    apply_history(est, state, [HistoryRecord("ghost", GPU, Resources(vram=1), False)])
+    apply_history(est, state, [HistoryRecord("ghost", GPU, Resources(vram=1), False, 1)])
