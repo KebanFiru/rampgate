@@ -47,8 +47,6 @@ class ReducerMachine(RuleBasedStateMachine):
     def jobs_in(self, *states: JobState) -> list[str]:
         return sorted(j for j, rt in self.d.state.jobs.items() if rt.state in states)
 
-    # -- rules -----------------------------------------------------------------
-
     @rule(
         job=st.sampled_from(JOBS),
         placement=st.sampled_from(PLACEMENTS),
@@ -110,13 +108,13 @@ class ReducerMachine(RuleBasedStateMachine):
         before = self.d.rt(job)
         self.d(JobExited(job, before.attempt, kind, self.tick(dt)))
         after = self.d.rt(job)
-        if before.stop_intent is not None:  # I13
+        if before.stop_intent is not None:
             assert after.state in (JobState.SUCCEEDED, JobState.PREEMPTED, JobState.CANCELLED)
             assert after.attempt == before.attempt
-        if kind is ExitKind.LOST:  # I12
+        if kind is ExitKind.LOST:
             assert after.oom_count == before.oom_count
             assert after.learned == before.learned
-        if kind is ExitKind.OOM and before.stop_intent is not StopReason.CANCEL:  # I7
+        if kind is ExitKind.OOM and before.stop_intent is not StopReason.CANCEL:
             assert after.oom_count == before.oom_count + 1
             for dev in before.job.devices:
                 prev = before.prev_estimate(dev) or Resources()
@@ -162,8 +160,6 @@ class ReducerMachine(RuleBasedStateMachine):
             self.d(action)
         assert self.d.state.outbox == ()
 
-    # -- invariants ------------------------------------------------------------
-
     @invariant()
     def consistent(self) -> None:
         for job, rt in self.d.state.jobs.items():
@@ -178,7 +174,7 @@ class ReducerMachine(RuleBasedStateMachine):
                 assert rt.stop_intent is None
             if rt.reservation:
                 assert rt.state in (JobState.STABLE, JobState.STOPPING)
-            for dev, res in rt.reservation.items():  # I6
+            for dev, res in rt.reservation.items():
                 key = (job, rt.attempt, dev)
                 if key in self.reservations:
                     assert self.reservations[key].fits_in(res)

@@ -15,7 +15,6 @@ MiB = 1024**2
 GiB = 1024**3
 TiB = 1024**4
 
-# Relative tolerance for subtraction underflow (see SPEC §3.1).
 _EPS_REL = 1e-9
 
 
@@ -66,8 +65,6 @@ class Resources(Mapping[str, Number]):
         self._values = dict(self._items)
         self._hash = hash(self._items)
 
-    # -- Mapping protocol -------------------------------------------------
-
     def __getitem__(self, dim: str) -> Number:
         return self._values.get(dim, 0)
 
@@ -101,8 +98,6 @@ class Resources(Mapping[str, Number]):
 
     def __reduce__(self) -> tuple[type[Resources], tuple[dict[str, Number]]]:
         return (Resources, (dict(self._values),))
-
-    # -- arithmetic -------------------------------------------------------
 
     def _dims(self, other: Resources) -> list[str]:
         return sorted(self._values.keys() | other._values.keys())
@@ -155,8 +150,6 @@ class Resources(Mapping[str, Number]):
         """Component-wise minimum. Also usable as ``Resources.min(a, b)``."""
         return Resources({d: min(self[d], other[d]) for d in self._dims(other)})
 
-    # -- comparisons ------------------------------------------------------
-
     def fits_in(self, other: Resources) -> bool:
         """True iff every dimension of ``self`` is ``<=`` the same dimension of ``other``."""
         return all(v <= other[d] for d, v in self._items)
@@ -168,8 +161,6 @@ class Resources(Mapping[str, Number]):
     @property
     def is_zero(self) -> bool:
         return not self._items
-
-    # -- serialization ----------------------------------------------------
 
     def to_json(self) -> dict[str, Number]:
         """A plain ``dict`` (sorted, zeros omitted) suitable for ``json.dumps``."""

@@ -82,7 +82,6 @@ class JobExited:
     attempt: int
     kind: ExitKind
     t: float
-    # Dimensions that ran out (OOM only); None = all dimensions.
     oom_dims: tuple[str, ...] | None = None
 
     def __post_init__(self) -> None:

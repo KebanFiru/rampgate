@@ -44,9 +44,6 @@ RUNNING = [JobState.STARTING, JobState.WARMING, JobState.STABLE]
 TERMINAL = [JobState.SUCCEEDED, JobState.FAILED, JobState.CANCELLED]
 
 
-# -- submit ----------------------------------------------------------------------------
-
-
 def test_submit_creates_pending_attempt_1() -> None:
     d = Driver().submit("a").submit("b")
     assert d.rt("a").state is JobState.PENDING
@@ -76,9 +73,6 @@ def test_unknown_job_raises() -> None:
         Driver()(JobStarted("ghost", 1, 0.0))
 
 
-# -- PENDING -> STARTING ---------------------------------------------------------------
-
-
 def test_start_moves_to_starting_and_records_admission() -> None:
     d = Driver().submit().start(free={GPU: Resources(vram=60)})
     rt = d.rt()
@@ -90,7 +84,6 @@ def test_start_moves_to_starting_and_records_admission() -> None:
 def test_start_not_alone_with_other_active_job() -> None:
     d = Driver().submit("a").start("a").submit("b").start("b")
     assert d.rt("b").admitted_alone == {GPU: False}
-    # A finished neighbour does not count.
     d2 = Driver().to(JobState.SUCCEEDED, "a").submit("b").start("b")
     assert d2.rt("b").admitted_alone == {GPU: True}
 
@@ -126,9 +119,6 @@ def test_start_future_attempt_raises_and_stale_is_noop() -> None:
     assert d.state == before
 
 
-# -- STARTING -> WARMING ---------------------------------------------------------------
-
-
 def test_started_moves_to_warming() -> None:
     d = Driver().submit().start().started(t=5.0)
     assert d.rt().state is JobState.WARMING
@@ -153,9 +143,6 @@ def test_started_after_stop_sent_while_starting_stays_stopping() -> None:
     d.started(t=3.0)
     assert d.rt().state is JobState.STOPPING
     assert d.rt().warm_start == 3.0
-
-
-# -- WARMING -> STABLE -----------------------------------------------------------------
 
 
 def test_mark_stable() -> None:
@@ -187,9 +174,6 @@ def test_mark_stable_reservation_must_cover_placement() -> None:
         d(MarkStable("j", 1, {}))
     with pytest.raises(InvalidTransition, match="future"):
         d(MarkStable("j", 2, {GPU: Resources()}))
-
-
-# -- exits from running states ---------------------------------------------------------
 
 
 @pytest.mark.parametrize("state", RUNNING)
@@ -232,7 +216,7 @@ def test_exit_preempted_without_stop(state: JobState) -> None:
     assert d.rt().state is JobState.PREEMPTED
     d(ResumeRequested("j"))
     assert (d.rt().state, d.rt().attempt) == (JobState.PENDING, 2)
-    assert d.start_action().resume  # any exit means the attempt ran
+    assert d.start_action().resume
 
 
 @pytest.mark.parametrize("state", RUNNING)
@@ -245,7 +229,7 @@ def test_exit_cancelled_without_stop(state: JobState) -> None:
 def test_exit_without_running_raises(state: JobState) -> None:
     d = Driver().to(state)
     if state in (JobState.SUCCEEDED, JobState.FAILED):
-        d.exited(ExitKind.SUCCESS)  # replay of the applied exit: ignored
+        d.exited(ExitKind.SUCCESS)
         assert d.ignored == [IgnoreReason.DUPLICATE]
         return
     with pytest.raises(InvalidTransition, match="never started"):
@@ -256,9 +240,6 @@ def test_exit_future_attempt_raises() -> None:
     d = Driver().to(JobState.WARMING)
     with pytest.raises(InvalidTransition, match="future"):
         d(JobExited("j", 2, ExitKind.SUCCESS, 1.0))
-
-
-# -- LOST ------------------------------------------------------------------------------
 
 
 @pytest.mark.parametrize("state", RUNNING)
@@ -293,7 +274,7 @@ def test_lost_retries_are_bounded() -> None:
     for attempt in range(1, 3):
         d.start().started().exited(ExitKind.LOST)
         assert (d.rt().state, d.rt().attempt) == (JobState.PENDING, attempt + 1)
-    d.start().started().exited(ExitKind.LOST)  # the 3rd consecutive LOST
+    d.start().started().exited(ExitKind.LOST)
     assert d.rt().state is JobState.FAILED
     assert d.state.outbox[-1] == Fail("j", 3, FailReason.LOST_RETRIES_EXHAUSTED)
 
@@ -304,9 +285,6 @@ def test_lost_counter_resets_after_stable() -> None:
     d.start().started().observe(1.0, vram=1).stable().exited(ExitKind.LOST)
     assert d.rt().state is JobState.PENDING
     assert d.rt().lost_count == 1
-
-
-# -- preempt / resume / cancel ---------------------------------------------------------
 
 
 def test_preempt_pending_holds_job() -> None:
@@ -366,10 +344,9 @@ def test_cancel_running_via_stop(state: JobState) -> None:
 def test_cancel_upgrades_preempt_intent() -> None:
     d = Driver().to(JobState.STABLE)(PreemptRequested("j"), CancelRequested("j"))
     assert d.rt().stop_intent is StopReason.CANCEL
-    # And while already stopping for a preempt:
     d2 = Driver().to(JobState.STABLE).stop(StopReason.PREEMPT)(CancelRequested("j"))
     d2.exited(ExitKind.PREEMPTED)
-    assert d2.rt().state is JobState.PREEMPTED  # "as named" (SPEC §3.4 table)
+    assert d2.rt().state is JobState.PREEMPTED
     d3 = Driver().to(JobState.STABLE).stop(StopReason.PREEMPT)(CancelRequested("j"))
     d3.exited(ExitKind.FAILURE)
     assert d3.rt().state is JobState.CANCELLED
@@ -392,9 +369,6 @@ def test_resume_requires_preempted(state: JobState) -> None:
         Driver().to(state)(ResumeRequested("j"))
 
 
-# -- Stop action -----------------------------------------------------------------------
-
-
 def test_stop_without_request_raises() -> None:
     d = Driver().to(JobState.WARMING)
     with pytest.raises(InvalidTransition, match="matching request"):
@@ -413,14 +387,10 @@ def test_stop_is_idempotent_and_noop_after_exit() -> None:
     before = d.state
     d(stop)
     assert d.state == before
-    # The job exits on its own before the Stop is reduced.
     d = Driver().to(JobState.WARMING)(PreemptRequested("j")).exited(ExitKind.SUCCESS)
     before = d.state
     d(stop)
     assert d.state == before
-
-
-# -- Requeue(START_TIMEOUT) ------------------------------------------------------------
 
 
 def test_start_timeout_requeues() -> None:
@@ -431,7 +401,6 @@ def test_start_timeout_requeues() -> None:
     before = d.state
     d(timeout)
     assert d.state == before
-    # A late JobStarted for the timed-out attempt is stale.
     d(JobStarted("j", 1, 9.0))
     assert d.ignored == [IgnoreReason.STALE_ATTEMPT]
 
@@ -454,9 +423,6 @@ def test_start_timeout_requires_starting() -> None:
     d = Driver().to(JobState.WARMING)
     with pytest.raises(InvalidTransition, match="START_TIMEOUT"):
         d(Requeue("j", 2, {GPU: None}, RequeueReason.START_TIMEOUT))
-
-
-# -- JobUpdated ------------------------------------------------------------------------
 
 
 def test_update_pending_any_field() -> None:
@@ -507,9 +473,6 @@ def test_job_updated_unset_sentinel() -> None:
     assert JobUpdated("j").group is UNSET
 
 
-# -- terminal states reject everything else --------------------------------------------
-
-
 @pytest.mark.parametrize("state", [JobState.SUCCEEDED, JobState.FAILED])
 def test_replayed_start_of_finished_attempt_is_noop(state: JobState) -> None:
     d = Driver().to(state)
@@ -528,9 +491,6 @@ def test_cancelled_pending_rejects_started() -> None:
     d = Driver().to(JobState.CANCELLED)
     with pytest.raises(InvalidTransition, match="never told"):
         d.started()
-
-
-# -- pause, devices --------------------------------------------------------------------
 
 
 def test_pause_unpause() -> None:
@@ -568,16 +528,13 @@ def test_state_initial_rejects_duplicate_devices() -> None:
         State.initial([Device(GPU, Resources()), Device(GPU, Resources())])
 
 
-# -- outbox / drain / dispatch ---------------------------------------------------------
-
-
 def test_clear_only_actions_drain_the_outbox() -> None:
     d = Driver().to(JobState.WARMING).exited(ExitKind.FAILURE)
     (fail,) = d.state.outbox
     d(fail)
     assert d.state.outbox == ()
     before = d.state
-    d(fail, GroupCompleted("g", GroupOutcome.OK))  # unknown / already cleared: no-op
+    d(fail, GroupCompleted("g", GroupOutcome.OK))
     assert d.state == before
 
 

@@ -58,7 +58,6 @@ class JobState(StrEnum):
 
 
 TERMINAL_STATES = frozenset({JobState.SUCCEEDED, JobState.FAILED, JobState.CANCELLED})
-# States in which an attempt holds a process on its devices.
 ACTIVE_STATES = frozenset({JobState.STARTING, JobState.WARMING, JobState.STABLE, JobState.STOPPING})
 
 
@@ -159,16 +158,11 @@ class JobRuntime:
     has_run: bool = False
     oom_count: int = 0
     lost_count: int = 0
-    # Estimate learned from OOMs, per device. Empty = nothing learned yet.
     learned: Mapping[DeviceId, Resources] = field(default_factory=frozen_map)
     stop_intent: StopReason | None = None
-    # Sticky: the job reported steps in some attempt, so Rule S keeps requiring them.
     reports_steps: bool = False
-    # (attempt, kind) of lifecycle facts already applied, for deduplication.
     applied: frozenset[tuple[int, str]] = frozenset()
-    # Time of the last exit; observations older than it belong to a past attempt.
     last_exit_t: float | None = None
-    # --- per attempt -------------------------------------------------------
     admitted_free: Mapping[DeviceId, Resources] = field(default_factory=frozen_map)
     admitted_alone: Mapping[DeviceId, bool] = field(default_factory=frozen_map)
     warm_start: float | None = None
@@ -204,7 +198,6 @@ class DeviceState:
     device: Device
     used_total: Resources | None = None
     last_obs_t: float | None = None
-    # (t, foreign usage) samples within the foreign window, oldest first.
     foreign_samples: tuple[tuple[float, Resources], ...] = ()
 
     @property
@@ -228,7 +221,6 @@ class State:
     jobs: Mapping[JobId, JobRuntime] = field(default_factory=frozen_map)
     next_seq: int = 0
     paused: bool = False
-    # Actions produced by reduce, waiting for decide to emit them (see SPEC §4).
     outbox: tuple[Action, ...] = ()
     history_records: tuple[HistoryRecord, ...] = ()
     ignored_events: tuple[IgnoredEvent, ...] = ()

@@ -19,14 +19,14 @@ def test_not_stable_before_min_warmup() -> None:
 
 def test_stable_with_steps_and_quiet_window() -> None:
     d = warming().observe(5.0, vram=10, steps=0).observe(10.0, vram=10, steps=20)
-    assert not is_stable(d.rt(), 64.9, CFG)  # window since growth at t=5
+    assert not is_stable(d.rt(), 64.9, CFG)
     assert is_stable(d.rt(), 65.0, CFG)
 
 
 def test_not_stable_without_enough_steps() -> None:
     d = warming().observe(5.0, vram=10, steps=0).observe(10.0, vram=10, steps=19)
     assert not is_stable(d.rt(), 500.0, CFG)
-    assert is_stable(d.rt(), 600.0, CFG)  # max_warmup_s fallback
+    assert is_stable(d.rt(), 600.0, CFG)
 
 
 def test_peak_growth_restarts_window() -> None:
@@ -55,7 +55,6 @@ def test_no_observations_quiet_since_warm_start() -> None:
 
 
 def test_last_peak_growth_at_zero_is_honoured() -> None:
-    # t = 0.0 must not be treated as "never grew".
     d = Driver(config=CFG).to(JobState.STARTING).observe(0.0, vram=10).started(t=-100.0)
     assert d.rt().last_peak_growth_t == 0.0
     assert not is_stable(d.rt(), 59.0, CFG)
@@ -98,7 +97,7 @@ def test_cumulative_and_reset_counters_stabilize_at_same_time() -> None:
 def test_steps_reset_by_start() -> None:
     d = warming().observe(1.0, vram=10, steps=5).observe(2.0, vram=10, steps=9)
     d.exited(ExitKind.OOM).start()
-    assert d.rt().steps_in_attempt == 0  # reset, and still required (reports_steps)
+    assert d.rt().steps_in_attempt == 0
     assert d.rt().peak == {}
 
 
@@ -111,7 +110,7 @@ def test_is_peak_growth() -> None:
 
 def test_step_reporting_job_keeps_needing_steps_after_resume() -> None:
     d = warming().observe(1.0, vram=10, steps=100).exited(ExitKind.LOST, t=2.0)
-    d.start().started(t=10.0).observe(11.0, vram=10)  # a usage-only sample, no steps
+    d.start().started(t=10.0).observe(11.0, vram=10)
     assert d.rt().steps_in_attempt == 0
     assert not is_stable(d.rt(), 500.0, CFG)
     assert is_stable(d.rt(), 610.0, CFG)

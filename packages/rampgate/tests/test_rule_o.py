@@ -47,7 +47,7 @@ def test_oom_estimate_strictly_increases_until_capacity() -> None:
         est = d.rt().learned[GPU]["vram"]
         assert est > last or est == 100
         last = est
-        free = Resources()  # later attempts learn from the estimate alone
+        free = Resources()
     assert d.rt().state is JobState.FAILED
     assert d.state.outbox[-1].reason is FailReason.EXCEEDS_DEVICE_CAPACITY  # type: ignore[union-attr]
     assert last == 100
@@ -70,7 +70,6 @@ def test_oom_at_capacity_with_foreign_usage_requeues() -> None:
     d.submit("j", {GPU: Resources(vram=100)}).start().exited(ExitKind.OOM)
     assert d.rt().admitted_alone == {GPU: False}
     assert d.rt().state is JobState.PENDING
-    # Below foreign_tolerance (2 %) still counts as alone.
     d2 = Driver()(DeviceObserved(GPU, 0.0, Resources(vram=1)))
     d2.submit("j", {GPU: Resources(vram=100)}).start().exited(ExitKind.OOM)
     assert d2.rt().state is JobState.FAILED
@@ -136,5 +135,5 @@ def test_oom_in_dimension_the_device_lacks_still_grows() -> None:
 
 
 def test_zero_lower_bound_is_not_recorded() -> None:
-    d = Driver().submit().start().exited(ExitKind.OOM)  # forced/empty admission, no data
+    d = Driver().submit().start().exited(ExitKind.OOM)
     assert d.state.history_records == ()

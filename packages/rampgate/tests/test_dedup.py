@@ -62,9 +62,9 @@ def test_out_of_order_observation_never_moves_growth_time_back() -> None:
 
 def test_observation_without_attempt_after_exit_is_stale() -> None:
     d = Driver().to(JobState.WARMING).exited(ExitKind.OOM, t=30.0)
-    d.observe(25.0, vram=7)  # job is PENDING again
+    d.observe(25.0, vram=7)
     assert d.ignored == [S]
-    d.start().started(t=40.0).observe(29.0, vram=7)  # older than the last exit
+    d.start().started(t=40.0).observe(29.0, vram=7)
     assert d.ignored == [S, S]
     assert d.rt().peak == {}
 
@@ -93,10 +93,10 @@ def test_observation_future_attempt_raises() -> None:
 
 def test_device_observed_foreign_window() -> None:
     d = Driver(config=Config(foreign_window_s=10)).to(JobState.WARMING).observe(1.0, vram=30)
-    d(DeviceObserved(GPU, 1.0, Resources(vram=50)))  # 20 foreign
-    d(DeviceObserved(GPU, 5.0, Resources(vram=35)))  # 5 foreign
+    d(DeviceObserved(GPU, 1.0, Resources(vram=50)))
+    d(DeviceObserved(GPU, 5.0, Resources(vram=35)))
     assert d.state.devices[GPU].foreign == Resources(vram=20)
-    d(DeviceObserved(GPU, 12.0, Resources(vram=31)))  # t=1 sample leaves the window
+    d(DeviceObserved(GPU, 12.0, Resources(vram=31)))
     assert d.state.devices[GPU].foreign == Resources(vram=5)
     d(DeviceObserved(GPU, 12.0, Resources(vram=99)), DeviceObserved(GPU, 3.0, Resources(vram=99)))
     assert d.ignored == [D, OOO]

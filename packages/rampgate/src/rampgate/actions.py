@@ -89,7 +89,6 @@ class Start(_ActionMixin):
     attempt: int
     placement: tuple[DeviceId, ...]
     resume: bool
-    # free_d per placement device at admission; Rule O learns from it.
     admitted_free: Mapping[DeviceId, Resources]
 
 
@@ -119,7 +118,6 @@ class UpdateReservation(_ActionMixin):
 class Requeue(_ActionMixin):
     job_id: JobId
     next_attempt: int
-    # Learned per-device estimate the next attempt will be admitted with (None = unknown).
     new_estimate: Mapping[DeviceId, Resources | None]
     reason: RequeueReason
 

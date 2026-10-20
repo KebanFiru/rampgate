@@ -17,9 +17,6 @@ VALUES = st.one_of(
 RES = st.dictionaries(DIMS, VALUES, max_size=5).map(Resources)
 
 
-# -- construction ----------------------------------------------------------
-
-
 def test_construct_kwargs_and_mapping() -> None:
     r = Resources({"nvidia.com/gpu": 1}, vram=24 * GiB)
     assert r["vram"] == 24 * GiB
@@ -86,9 +83,6 @@ def test_equality_with_plain_mapping() -> None:
     assert Resources(vram=1) != 1
 
 
-# -- arithmetic ------------------------------------------------------------
-
-
 def test_add() -> None:
     assert Resources(vram=1, cpu=2) + Resources(vram=3, ram=4) == Resources(vram=4, cpu=2, ram=4)
 
@@ -120,7 +114,6 @@ def test_sub_float_tolerance_snaps_to_zero() -> None:
 
 
 def test_sub_tolerance_floor_is_absolute_for_small_values() -> None:
-    # eps = 1e-9 * max(|a|, |b|, 1): tiny values use an absolute floor of 1e-9.
     assert Resources(x=0.0) - Resources(x=5e-10) == Resources()
     with pytest.raises(ValueError):
         Resources() - Resources(x=2e-9)
@@ -184,9 +177,6 @@ def test_pickle_and_copy() -> None:
     assert copy.deepcopy(r) == r
 
 
-# -- properties ------------------------------------------------------------
-
-
 @given(RES, RES)
 def test_add_commutative(a: Resources, b: Resources) -> None:
     assert a + b == b + a
@@ -204,7 +194,7 @@ def test_add_associative_on_ints(a: Resources, b: Resources, c: Resources) -> No
 def test_add_then_sub_round_trips(a: Resources, b: Resources) -> None:
     back = (a + b) - b
     for d in a.keys() | back.keys():
-        scale = max(a[d], b[d], 1)  # float cancellation error grows with the larger operand
+        scale = max(a[d], b[d], 1)
         assert math.isclose(back[d], a[d], rel_tol=1e-9, abs_tol=1e-12 * scale)
 
 
@@ -243,7 +233,6 @@ def test_hash_consistent_with_eq(a: Resources, b: Resources) -> None:
 
 @given(RES, st.sampled_from([1.15, 1.25, 1.1, 0.9, 1 / 3]))
 def test_scale_round_off_never_raises(a: Resources, k: float) -> None:
-    # e.g. the reservation peak*margin compared against the peak itself
     scaled = a.scale(k).scale(1 / k)
     scaled - a
     a - scaled

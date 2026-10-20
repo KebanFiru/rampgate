@@ -45,7 +45,7 @@ def test_stopping_exit_table(kind: ExitKind, reason: StopReason, end: JobState) 
     d = stopping(reason).exited(kind)
     rt = d.rt()
     assert rt.state is end
-    assert rt.attempt == 1  # never re-queued (I13)
+    assert rt.attempt == 1
     assert rt.stop_intent is None
     assert rt.reservation == {}
 
@@ -56,7 +56,7 @@ def test_exit_with_requested_but_unsent_stop_follows_table(
 ) -> None:
     d = Driver().to(JobState.STABLE)
     d(PreemptRequested("j") if reason is P else CancelRequested("j"))
-    assert d.rt().state is JobState.STABLE  # Stop not reduced yet
+    assert d.rt().state is JobState.STABLE
     d.exited(kind)
     assert d.rt().state is end
 

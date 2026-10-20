@@ -148,9 +148,6 @@ def drain(state: State) -> tuple[State, tuple[IgnoredEvent, ...], tuple[HistoryR
     )
 
 
-# -- helpers -----------------------------------------------------------------
-
-
 def _ignore(state: State, event: Event, reason: IgnoreReason) -> State:
     return replace(state, ignored_events=(*state.ignored_events, IgnoredEvent(event, reason)))
 
@@ -229,9 +226,6 @@ def _observed_peaks(rt: JobRuntime, *, lower_bound: bool) -> list[HistoryRecord]
     ]
 
 
-# -- job events ----------------------------------------------------------------
-
-
 def _job_submitted(state: State, ev: JobSubmitted) -> State:
     job = ev.job
     existing = state.jobs.get(job.id)
@@ -280,7 +274,6 @@ def _job_started(state: State, ev: JobStarted) -> State:
     if (ev.attempt, _STARTED) in rt.applied:
         return _ignore(state, ev, IgnoreReason.DUPLICATE)
     if (ev.attempt, _EXITED) in rt.applied:
-        # The exit overtook the start (e.g. the process died immediately).
         return _ignore(state, ev, IgnoreReason.OUT_OF_ORDER)
     if rt.state not in (JobState.STARTING, JobState.STOPPING):
         raise _bad(rt, "started but it was never told to start")
@@ -305,7 +298,6 @@ def _job_observed(state: State, ev: JobObserved, config: Config) -> State:
         raise _bad(rt, f"observed on {ev.device_id!r}, which is not in its placement")
     if rt.state not in ACTIVE_STATES:
         if (attempt, _EXITED) in rt.applied or (ev.attempt is None and rt.has_run):
-            # A late sample of an attempt that already ended.
             return _ignore(state, ev, IgnoreReason.STALE_ATTEMPT)
         raise _bad(rt, "observed but it was never started")
     if ev.attempt is None and rt.last_exit_t is not None and ev.t <= rt.last_exit_t:
@@ -326,7 +318,7 @@ def _job_observed(state: State, ev: JobObserved, config: Config) -> State:
     baseline, latest = rt.steps_baseline, rt.steps_latest
     if ev.steps is not None:
         if latest is None or ev.steps < latest:
-            baseline = ev.steps  # first sample of the attempt, or the script reset its counter
+            baseline = ev.steps
         latest = ev.steps
 
     rt = replace(
@@ -345,7 +337,6 @@ def _job_observed(state: State, ev: JobObserved, config: Config) -> State:
         grown = reserved.max(new_peak.scale(config.safety_margin))
         rt = replace(rt, reservation=frozen_map({**rt.reservation, dev: grown}))
         update = UpdateReservation(rt.id, rt.attempt, rt.reservation)
-        # Only the latest reservation matters; drop an older one not yet emitted.
         outbox = tuple(
             a
             for a in state.outbox
@@ -457,7 +448,7 @@ def _learn_from_oom(
             if prev[dim] > 0 and prev[dim] >= cap[dim] and rt.admitted_alone.get(d, False):
                 exceeds_capacity = True
         learned[d] = Resources(new)
-        if any(lower.values()):  # a zero bound would turn "unknown" into "known zero"
+        if any(lower.values()):
             records.append(HistoryRecord(rt.id, d, Resources(lower), lower_bound=True))
     return frozen_map(learned), records, exceeds_capacity
 
@@ -480,8 +471,6 @@ def _oom(state: State, rt: JobRuntime, ev: JobExited, config: Config) -> State:
 def _lost(state: State, rt: JobRuntime, config: Config) -> State:
     """An involuntary preemption: no OOM accounting, no history (the peak is incomplete)."""
     rt = replace(rt, lost_count=rt.lost_count + 1)
-    # SPEC §3.4: fail *after* max_lost_retries consecutive LOST exits (unlike OOM, which
-    # fails once the count exceeds max_oom_retries).
     if rt.lost_count >= config.max_lost_retries:
         state = _emit(state, Fail(rt.id, rt.attempt, FailReason.LOST_RETRIES_EXHAUSTED))
         return _put(state, _end_attempt(rt, JobState.FAILED))
@@ -490,15 +479,11 @@ def _lost(state: State, rt: JobRuntime, config: Config) -> State:
     return _put(state, rt)
 
 
-# -- control requests ------------------------------------------------------------
-
-
 def _preempt_requested(state: State, ev: PreemptRequested) -> State:
     rt = _job(state, ev.job_id)
     if rt.state is JobState.PENDING:
         return _put(state, replace(rt, state=JobState.PREEMPTED))
     if rt.state is JobState.PREEMPTED or rt.stop_intent is not None:
-        # Already preempted, or a stop (preempt or the stronger cancel) is under way.
         return _ignore(state, ev, IgnoreReason.DUPLICATE)
     if rt.state in ACTIVE_STATES:
         return _put(state, replace(rt, stop_intent=StopReason.PREEMPT))
@@ -512,7 +497,6 @@ def _cancel_requested(state: State, ev: CancelRequested) -> State:
     if rt.state is JobState.CANCELLED or rt.stop_intent is StopReason.CANCEL:
         return _ignore(state, ev, IgnoreReason.DUPLICATE)
     if rt.state in ACTIVE_STATES:
-        # Also upgrades a pending preempt: the exit will then end in CANCELLED.
         return _put(state, replace(rt, stop_intent=StopReason.CANCEL))
     raise _bad(rt, "cannot cancel a finished job")
 
@@ -523,12 +507,8 @@ def _resume_requested(state: State, ev: ResumeRequested) -> State:
         return _ignore(state, ev, IgnoreReason.DUPLICATE)
     if rt.state is not JobState.PREEMPTED:
         raise _bad(rt, "only a PREEMPTED job can be resumed")
-    # A preempted attempt that ran is used up; a job held while PENDING keeps its attempt.
     used = (rt.attempt, _EXITED) in rt.applied
     return _put(state, replace(rt, state=JobState.PENDING, attempt=rt.attempt + int(used)))
-
-
-# -- devices -----------------------------------------------------------------------
 
 
 def _device_added(state: State, ev: DeviceAdded) -> State:
@@ -576,9 +556,6 @@ def _device_observed(state: State, ev: DeviceObserved, config: Config) -> State:
     return replace(state, devices=frozen_map({**state.devices, ev.device_id: ds}))
 
 
-# -- transition actions ------------------------------------------------------------
-
-
 def _is_alone(state: State, device_id: DeviceId, job_id: JobId, config: Config) -> bool:
     """No other active managed job on the device and negligible foreign usage."""
     ds = state.devices[device_id]
@@ -619,7 +596,7 @@ def _stop(state: State, a: Stop) -> State:
     if a.attempt > rt.attempt:
         raise _bad(rt, f"Stop for future attempt {a.attempt}")
     if (a.attempt, _EXITED) in rt.applied:
-        return state  # the job exited before the Stop was applied
+        return state
     if rt.state not in ACTIVE_STATES or rt.stop_intent is not a.reason:
         raise _bad(rt, f"Stop({a.reason}) without a matching request")
     return _put(state, replace(rt, state=JobState.STOPPING))

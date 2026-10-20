@@ -32,8 +32,6 @@ from rampgate import (
 )
 from rampgate.actions import canonical
 
-# -- Device / Job --------------------------------------------------------------------
-
 
 def test_device_validation_and_frozen_labels() -> None:
     labels = {"kind": "a100"}
@@ -67,9 +65,6 @@ def test_job_equality_ignores_mapping_identity() -> None:
     assert Job("j", {"a": None}, metadata={"k": "v"}) == Job("j", {"a": None}, metadata={"k": "v"})
 
 
-# -- events ---------------------------------------------------------------------------
-
-
 @pytest.mark.parametrize("t", [float("nan"), float("inf"), True, "1"])
 def test_event_time_must_be_finite(t: object) -> None:
     with pytest.raises(ValueError, match="finite"):
@@ -94,8 +89,6 @@ def test_oom_dims_only_for_oom() -> None:
     with pytest.raises(ValueError, match="oom_dims"):
         JobExited("j", 1, ExitKind.FAILURE, 0.0, ("vram",))
 
-
-# -- actions ----------------------------------------------------------------------------
 
 R = Resources(vram=1)
 ALL_ACTIONS = [
@@ -133,9 +126,6 @@ def test_canonical_is_json() -> None:
         json.dumps(canonical(a))
     with pytest.raises(TypeError):
         canonical(object())
-
-
-# -- config -----------------------------------------------------------------------------
 
 
 def test_config_defaults_match_spec() -> None:

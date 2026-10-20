@@ -54,8 +54,6 @@ class Driver:
     def ignored(self) -> list[IgnoreReason]:
         return [i.reason for i in self.state.ignored_events]
 
-    # -- events ----------------------------------------------------------
-
     def submit(
         self,
         job_id: str = "j",
@@ -113,8 +111,6 @@ class Driver:
         )
         self(event)
         return self(Stop(job_id, self.rt(job_id).attempt, reason, self.config.preempt_grace_s))
-
-    # -- shortcuts ---------------------------------------------------------
 
     def to(self, target: JobState, job_id: str = "j", **submit_kw: object) -> Driver:
         """Drive a fresh job to ``target`` along the main path."""

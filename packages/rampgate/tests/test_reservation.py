@@ -11,7 +11,7 @@ def stable(peak: float = 40) -> Driver:
 
 
 def test_peak_below_reservation_changes_nothing() -> None:
-    d = stable().observe(2.0, vram=45)  # 45 < 40 * 1.15
+    d = stable().observe(2.0, vram=45)
     assert d.rt().reservation == {GPU: Resources(vram=40).scale(1.15)}
     assert d.state.outbox == ()
 
