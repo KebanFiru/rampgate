@@ -206,7 +206,7 @@ def check_starts(tick: Tick, policy: OrderingPolicy) -> None:
 
 def check_purity(tick: Tick, policy: OrderingPolicy) -> None:
     """I4 (determinism) and I5 (no duplicate Start/Stop right after applying a decision)."""
-    assert decide(tick.snapshot, tick.now, CFG, policy) == tick.decision
+    assert decide(tick.snapshot, tick.now, CFG, policy) == replace(tick.decision, ignored_events=())
     again = decide(Snapshot(tick.after, tick.snapshot.estimates), tick.now, CFG, policy)
     assert not [a for a in again.actions if isinstance(a, Start | Stop)]
 
