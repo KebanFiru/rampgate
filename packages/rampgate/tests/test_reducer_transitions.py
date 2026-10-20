@@ -7,7 +7,6 @@ import pytest
 from rampgate import (
     UNSET,
     CancelRequested,
-    CapacityExceeded,
     Config,
     Device,
     DeviceAdded,
@@ -15,7 +14,6 @@ from rampgate import (
     ExitKind,
     Fail,
     FailReason,
-    ForeignUsageHigh,
     GroupCompleted,
     GroupOutcome,
     HistoryRecord,
@@ -42,9 +40,10 @@ from rampgate import (
     StopReason,
     Unpaused,
     Warn,
+    WarnCleared,
     drain,
+    key_id,
     reduce,
-    warning_key,
 )
 from rampgate_testkit import GPU, GPU1, Driver, gpus
 
@@ -564,29 +563,24 @@ def test_group_completed_is_recorded_and_reopened_by_new_jobs() -> None:
     assert d.state.completed_groups == frozenset()
 
 
-def test_warn_records_key_and_queue_stopped_pauses() -> None:
+def test_one_shot_warning_is_recorded_and_queue_stopped_pauses() -> None:
     warn = Warn(QueueStopped("g", "j"))
     d = Driver()
     d.state = replace(d.state, outbox=(warn,))
     d(warn)
     assert d.state.outbox == ()
     assert d.state.paused
-    assert d.state.warned == {warning_key(warn.warning)}
+    assert d.state.warned == {key_id("QueueStopped", ("g", "j"))}
+    assert d.state.active_warnings == {}
 
 
-def test_warned_keys_are_pruned_when_their_condition_ends() -> None:
-    d = Driver().submit("j")
-    ce = Warn(CapacityExceeded(None, GPU, Resources(vram=1), Resources(), "j"))
-    other = Warn(ForeignUsageHigh(GPU, Resources(vram=1), "x"))
-    d(ce, other)
-    d.start("j")
-    assert d.state.warned == {warning_key(other.warning)}
-    d.started("j").observe(1.0, "j", vram=10).stable("j")
-    oc = Warn(Overcommitted(GPU, Resources(vram=200), Resources(vram=100)))
-    d(oc)
-    assert warning_key(oc.warning) in d.state.warned
-    d.exited(ExitKind.SUCCESS, "j")
-    assert d.state.warned == {warning_key(other.warning)}
+def test_edge_triggered_warning_is_active_until_cleared() -> None:
+    oc = Overcommitted(GPU, Resources(vram=200), Resources(vram=100))
+    d = Driver()(Warn(oc))
+    k = key_id("Overcommitted", (GPU,))
+    assert d.state.active_warnings == {k: oc}
+    d(WarnCleared("Overcommitted", (GPU,)), WarnCleared("Overcommitted", (GPU,)))
+    assert d.state.active_warnings == {}
 
 
 def test_drain_takes_ignored_and_history() -> None:

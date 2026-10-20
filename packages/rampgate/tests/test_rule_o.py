@@ -13,6 +13,7 @@ from rampgate import (
     Requeue,
     RequeueReason,
     Resources,
+    Start,
 )
 from rampgate_testkit import GPU, GPU1, Driver, gpus
 
@@ -137,3 +138,18 @@ def test_oom_in_dimension_the_device_lacks_still_grows() -> None:
 def test_zero_lower_bound_is_not_recorded() -> None:
     d = Driver().submit().start().exited(ExitKind.OOM)
     assert d.state.history_records == ()
+
+
+def test_unknown_job_oom_learns_at_least_unknown_min_free() -> None:
+    d = Driver().submit()
+    d(Start("j", 1, (GPU,), False, {GPU: Resources(vram=4)}, 0.0, {GPU: None}))
+    d.exited(ExitKind.OOM)
+    assert d.rt().learned[GPU] == Resources(vram=12.5)  # max(4, 10 % of 100) * 1.25
+    assert d.state.history_records[0].peak == Resources(vram=10.0)
+
+
+def test_oom_previous_estimate_includes_the_estimator_value() -> None:
+    d = Driver().submit()
+    d(Start("j", 1, (GPU,), False, {GPU: Resources(vram=4)}, 0.0, {GPU: Resources(vram=40)}))
+    d.exited(ExitKind.OOM)
+    assert d.rt().learned[GPU] == Resources(vram=50.0)

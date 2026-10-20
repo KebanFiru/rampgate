@@ -25,7 +25,7 @@ from rampgate import (
     Stop,
     StopReason,
 )
-from rampgate_testkit import GPU, GPU1, Driver, gpus
+from rampgate_testkit import GPU, GPU1, Driver, examples, gpus
 
 JOBS = ["a", "b", "c"]
 PLACEMENTS = [(GPU,), (GPU1,), (GPU, GPU1)]
@@ -181,5 +181,5 @@ class ReducerMachine(RuleBasedStateMachine):
                 self.reservations[key] = res
 
 
-ReducerMachine.TestCase.settings = settings(max_examples=150, stateful_step_count=60, deadline=None)
+ReducerMachine.TestCase.settings = settings(max_examples=examples(1.0), stateful_step_count=60)
 TestReducerMachine = ReducerMachine.TestCase

@@ -30,6 +30,9 @@ from rampgate import (
     UncleanStop,
     UpdateReservation,
     Warn,
+    WarnCleared,
+    is_edge_triggered,
+    key_id,
     warning_key,
 )
 from rampgate.actions import canonical
@@ -103,7 +106,8 @@ ALL_ACTIONS = [
     GroupCompleted("g", GroupOutcome.OK),
     Warn(CapacityExceeded("g", "a", R, Resources(), "j")),
     Warn(Overcommitted("a", R, R)),
-    Warn(ForeignUsageHigh("a", R, "j")),
+    Warn(ForeignUsageHigh("a", R, ("j",))),
+    WarnCleared("Overcommitted", ("a",)),
     Warn(QueueStopped("g", "j")),
     Warn(UncleanStop("j", 1)),
 ]
@@ -141,7 +145,7 @@ def test_config_defaults_match_spec() -> None:
     )
     assert (c.growth_tol, c.max_warmup_s, c.oom_growth, c.max_oom_retries) == (0.02, 600, 1.25, 2)
     assert (c.max_lost_retries, c.preempt_grace_s, c.foreign_window_s) == (3, 120, 10)
-    assert (c.foreign_tolerance, c.start_timeout_s, c.unknown_min_free) == (0.02, 300, Resources())
+    assert (c.foreign_tolerance, c.start_timeout_s, c.unknown_min_free) == (0.02, 300, 0.10)
 
 
 @pytest.mark.parametrize(
@@ -156,6 +160,8 @@ def test_config_defaults_match_spec() -> None:
         ({"max_oom_retries": 1.5}, TypeError),
         ({"min_warmup_s": True}, TypeError),
         ({"unknown_min_free": {"vram": 1}}, TypeError),
+        ({"unknown_min_free": 1.5}, ValueError),
+        ({"unknown_min_free": True}, TypeError),
     ],
 )
 def test_config_validation(kwargs: dict[str, object], exc: type[Exception]) -> None:
@@ -163,11 +169,22 @@ def test_config_validation(kwargs: dict[str, object], exc: type[Exception]) -> N
         Config(**kwargs)  # type: ignore[arg-type]
 
 
-def test_warning_keys_are_distinct_per_subject() -> None:
-    warnings = [a.warning for a in ALL_ACTIONS if isinstance(a, Warn)]
-    keys = [warning_key(w) for w in warnings]
-    assert len(set(keys)) == len(keys)
-    assert warning_key(UncleanStop("j", 1)) != warning_key(UncleanStop("j", 2))
+def test_warning_keys() -> None:
+    assert warning_key(CapacityExceeded("g", "a", R, R, "j")) == ("CapacityExceeded", ("j", "a"))
+    assert warning_key(Overcommitted("a", R, R)) == ("Overcommitted", ("a",))
+    assert warning_key(ForeignUsageHigh("a", R, ("x", "y"))) == ("ForeignUsageHigh", ("a",))
+    assert warning_key(UncleanStop("j", 2)) == ("UncleanStop", ("j", "2"))
+    assert warning_key(QueueStopped("g", "j")) == ("QueueStopped", ("g", "j"))
+    assert is_edge_triggered(Overcommitted("a", R, R))
+    assert not is_edge_triggered(QueueStopped("g", "j"))
+    assert key_id("Overcommitted", ("a",)) != key_id("Overcommitted", ("b",))
+
+
+def test_unknown_min_free_for() -> None:
+    cap = Resources(vram=80, ram=10)
+    assert Config().unknown_min_free_for(cap) == Resources(vram=8.0, ram=1.0)
+    absolute = Config(unknown_min_free=Resources(vram=3))
+    assert absolute.unknown_min_free_for(cap) == Resources(vram=3)
 
 
 def test_config_stable_requires_epoch_must_be_bool() -> None:

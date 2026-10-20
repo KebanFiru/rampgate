@@ -291,3 +291,28 @@ def test_executor_ignores_actions_for_unknown_or_stale_processes() -> None:
         {},
     )
     assert ex.procs["a"].stop is None
+
+
+def test_unknown_job_waits_for_real_free_capacity_on_a_full_gpu() -> None:
+    known = SimJob(Job("known", {GPU.id: Resources(vram=85)}), ramp(85, duration=120))
+    unknown = SimJob(Job("unknown", {GPU.id: None}), ramp(30, duration=60), submit_at=5)
+    scenario = Scenario((GPU,), (known, unknown))
+    trace = simulate(scenario, FifoPolicy())
+    final = trace.final.jobs
+    assert {rt.state for rt in final.values()} == {JobState.SUCCEEDED}
+    assert sum(rt.oom_count for rt in final.values()) == 0
+    start = next(
+        t.now
+        for t in trace.ticks
+        for a in t.decision.actions
+        if isinstance(a, Start) and a.job_id == "unknown"
+    )
+    known_exit = next(
+        t.now
+        for t in trace.ticks
+        for e in t.events
+        if isinstance(e, JobExited) and e.job_id == "known"
+    )
+    assert start >= known_exit
+    old_rule = simulate(scenario, FifoPolicy(), config=Config(unknown_min_free=Resources()))
+    assert old_rule.final.jobs["known"].oom_count + old_rule.final.jobs["unknown"].oom_count > 0

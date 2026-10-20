@@ -4,6 +4,8 @@ from __future__ import annotations
 
 from collections.abc import Iterable, Mapping
 
+from hypothesis import settings
+
 from rampgate import (
     CancelRequested,
     Config,
@@ -165,3 +167,8 @@ def decide_on(
 
 def apply(d: Driver, decision: Decision) -> Driver:
     return d(*decision.actions)
+
+
+def examples(fraction: float) -> int:
+    """Example count for an expensive hypothesis test, scaled from the active profile."""
+    return max(5, int(settings().max_examples * fraction))

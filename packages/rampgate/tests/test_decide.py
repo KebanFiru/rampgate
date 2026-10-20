@@ -5,6 +5,8 @@ import pytest
 from rampgate import (
     AwaitingResume,
     BasePolicy,
+    BlockedByForeignUsage,
+    CancelRequested,
     CapacityExceeded,
     Config,
     DeviceHeldFor,
@@ -38,6 +40,7 @@ from rampgate import (
     Unpaused,
     WaitingForWarmup,
     Warn,
+    WarnCleared,
     decide,
     device_loads,
 )
@@ -61,7 +64,7 @@ def test_one_warming_job_per_device() -> None:
     assert starts(dec) == ["a"]
     assert dec.explanations["b"] == WaitingForWarmup(GPU, "a")
     start = of_type(dec, Start)[0]
-    assert start == Start("a", 1, (GPU,), False, {GPU: Resources(vram=100)}, 0.0)
+    assert start == Start("a", 1, (GPU,), False, {GPU: Resources(vram=100)}, 0.0, {GPU: None})
 
 
 def test_waiting_for_warmup_names_existing_warming_job() -> None:
@@ -110,6 +113,24 @@ def test_unknown_estimate_uses_unknown_min_free() -> None:
     assert starts(decide_on(d2, 0.0)) == ["u"]
 
 
+@pytest.mark.parametrize(("reserved_peak", "admitted"), [(78, True), (79, False)])
+def test_unknown_estimate_needs_ten_percent_free_by_default(
+    reserved_peak: float, admitted: bool
+) -> None:
+    # 78 * 1.15 = 89.7 leaves 10.3 free; 79 * 1.15 = 90.85 leaves 9.15.
+    d = Driver().to(JobState.WARMING, "a").observe(1.0, "a", vram=reserved_peak).stable("a")
+    d.submit("u")
+    assert (starts(decide_on(d, 2.0)) == ["u"]) is admitted
+
+
+def test_unknown_estimate_refused_on_overcommitted_device() -> None:
+    d = Driver(config=Config(unknown_min_free=Resources())).to(JobState.WARMING, "a")
+    d.observe(1.0, "a", vram=95).stable("a").submit("u")
+    dec = decide_on(d, 2.0)
+    assert starts(dec) == []
+    assert dec.explanations["u"] == UnknownEstimateBlocked(GPU)
+
+
 def test_estimate_is_max_of_estimator_hint_and_learned() -> None:
     d = Driver().to(JobState.WARMING, "a").observe(1.0, "a", vram=50).stable("a")
     d.submit("b", {GPU: Resources(vram=10)})
@@ -153,10 +174,13 @@ def test_foreign_usage_window() -> None:
     d = Driver(config=cfg)(DeviceObserved(GPU, 0.0, Resources(vram=80)))
     d(DeviceObserved(GPU, 5.0, Resources(vram=10))).submit("b", {GPU: Resources(vram=50)})
     dec = decide_on(d, 9.0)
-    assert dec.explanations["b"] == InsufficientResources(GPU, "vram", 50, 20)
-    assert of_type(dec, Warn) == [Warn(ForeignUsageHigh(GPU, Resources(vram=80), "b"))]
-    assert dec.explanations["b"] == InsufficientResources(GPU, "vram", 50, 20)
-    assert starts(decide_on(d, 10.5)) == ["b"]  # the t=0 sample left the window
+    foreign = Resources(vram=80)
+    assert dec.explanations["b"] == BlockedByForeignUsage(GPU, "vram", 50, 20, foreign)
+    assert of_type(dec, Warn) == [Warn(ForeignUsageHigh(GPU, foreign, ("b",)))]
+    apply(d, dec)
+    later = decide_on(d, 10.5)  # the t=0 sample left the window
+    assert starts(later) == ["b"]
+    assert of_type(later, WarnCleared) == [WarnCleared("ForeignUsageHigh", (GPU,))]
 
 
 # -- head-of-line blocking ---------------------------------------------------------------
@@ -269,22 +293,49 @@ def test_newly_stable_job_frees_the_slot_in_the_same_tick() -> None:
 # -- warnings ------------------------------------------------------------------------------
 
 
-def test_capacity_exceeded_warns_once() -> None:
+def test_capacity_exceeded_raised_once_and_cleared_when_job_leaves_pending() -> None:
     d = Driver().submit("big", {GPU: Resources(vram=500)}, group="g")
     dec = decide_on(d, 0.0)
     warning = CapacityExceeded("g", GPU, Resources(vram=500), Resources(vram=100), "big")
     assert of_type(dec, Warn) == [Warn(warning)]
     apply(d, dec)
     assert of_type(decide_on(d, 1.0), Warn) == []
+    d(CancelRequested("big"))
+    cleared = decide_on(d, 2.0)
+    assert of_type(cleared, WarnCleared) == [WarnCleared("CapacityExceeded", ("big", GPU))]
+    apply(d, cleared)
+    assert decide_on(d, 3.0).actions == ()
 
 
-def test_overcommitted_warns_once() -> None:
+def test_capacity_exceeded_cleared_when_estimate_drops() -> None:
+    d = Driver().submit("big", {GPU: None})
+    raised = decide_on(d, 0.0, estimates={"big": {GPU: Resources(vram=500)}})
+    assert len(of_type(raised, Warn)) == 1
+    apply(d, raised)
+    dropped = decide_on(d, 1.0, estimates={"big": {GPU: Resources(vram=50)}})
+    assert of_type(dropped, WarnCleared) == [WarnCleared("CapacityExceeded", ("big", GPU))]
+    assert starts(dropped) == ["big"]
+
+
+def test_overcommitted_raised_once_and_cleared() -> None:
     d = Driver().to(JobState.WARMING, "a").observe(1.0, "a", vram=95).stable("a")
     dec = decide_on(d, 2.0)
     reserved = Resources(vram=95).scale(1.15)
     assert of_type(dec, Warn) == [Warn(Overcommitted(GPU, reserved, Resources(vram=100)))]
     apply(d, dec)
     assert of_type(decide_on(d, 3.0), Warn) == []
+    d.exited(ExitKind.SUCCESS, "a")
+    assert of_type(decide_on(d, 4.0), WarnCleared) == [WarnCleared("Overcommitted", (GPU,))]
+
+
+def test_foreign_usage_warning_lists_blocked_jobs_and_survives_pause() -> None:
+    d = Driver(gpus(GPU, GPU1))(DeviceObserved(GPU, 0.0, Resources(vram=80)))
+    d.submit("b", {GPU: Resources(vram=50)}).submit("c", {GPU: Resources(vram=30)})
+    dec = decide_on(d, 1.0, FifoPolicy(strict=False))
+    (warn,) = of_type(dec, Warn)
+    assert warn == Warn(ForeignUsageHigh(GPU, Resources(vram=80), ("b", "c")))
+    apply(d, dec)(Paused())
+    assert decide_on(d, 2.0).actions == ()  # paused: neither raised again nor cleared
 
 
 def test_no_foreign_warning_when_foreign_is_not_the_reason() -> None:

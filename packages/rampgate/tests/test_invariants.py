@@ -10,7 +10,7 @@ from __future__ import annotations
 from collections.abc import Callable
 from dataclasses import replace
 
-from hypothesis import HealthCheck, given, settings
+from hypothesis import given, settings
 from hypothesis import strategies as st
 
 from rampgate import (
@@ -43,9 +43,14 @@ from rampgate import (
     State,
     Stop,
     Unpaused,
+    Warn,
+    WarnCleared,
     decide,
     device_loads,
+    is_edge_triggered,
+    key_id,
     reduce,
+    warning_key,
 )
 from rampgate import DeviceObserved as DeviceObs
 from rampgate.sim import (
@@ -59,6 +64,7 @@ from rampgate.sim import (
     Trace,
     simulate,
 )
+from rampgate_testkit import examples
 
 CFG = Config(
     min_warmup_s=5,
@@ -69,11 +75,7 @@ CFG = Config(
     preempt_grace_s=5,
 )
 GROUPS = ["g0", "g1", "g2"]
-SETTINGS = settings(
-    max_examples=200,
-    deadline=None,
-    suppress_health_check=[HealthCheck.too_slow, HealthCheck.data_too_large],
-)
+SETTINGS = settings(max_examples=examples(0.8))
 
 vram = st.integers(1, 95).map(lambda v: Resources(vram=v))
 common = {
@@ -179,11 +181,13 @@ def check_starts(tick: Tick, policy: OrderingPolicy) -> None:
             assert action.placement == rt.job.devices  # I9
             assert action.resume == rt.has_run  # I10
             loads = device_loads(work, tick.now, CFG)
-            for d in action.placement:  # I2
+            for d in action.placement:  # I2 (unknown estimates are checked with unknown_min_free)
                 estimate = tick.snapshot.estimate(rt, d)
-                if rt.job.force or estimate is None:
+                if rt.job.force:
                     continue
                 load = loads[d]
+                if estimate is None:
+                    estimate = CFG.unknown_min_free_for(load.capacity)
                 used = load.reserved + load.warming_usage + load.foreign + estimate
                 for dim, value in used.items():
                     assert value <= load.capacity[dim] * (1 + 1e-9) + 1e-9, (d, dim, used)
@@ -251,6 +255,19 @@ def check_explained(tick: Tick) -> None:
             assert rt.id in tick.decision.explanations, rt.id
 
 
+def check_i16(tick: Tick, raised: dict[str, bool]) -> None:
+    """I16: per key, Warn and WarnCleared strictly alternate, starting with Warn."""
+    for action in tick.decision.actions:
+        if isinstance(action, Warn) and is_edge_triggered(action.warning):
+            k = key_id(*warning_key(action.warning))
+            assert not raised.get(k, False), ("raised twice", k)
+            raised[k] = True
+        elif isinstance(action, WarnCleared):
+            k = key_id(action.kind, action.key)
+            assert raised.get(k, False), ("cleared before raised", k)
+            raised[k] = False
+
+
 def check_groups(state: State) -> None:
     """I10: a PREEMPTED job keeps its group open."""
     for rt in state.jobs.values():
@@ -265,11 +282,13 @@ def test_invariants_hold_in_simulation(case: tuple[Scenario, OrderingPolicy]) ->
     trace = run(scenario, policy)
     prev = State.initial(scenario.devices)
     reservations: dict[tuple[str, int, str], Resources] = {}
+    raised: dict[str, bool] = {}
     for tick in trace.ticks:
         check_exits(prev, tick)
         check_starts(tick, policy)
         check_purity(tick, policy)
         check_explained(tick)
+        check_i16(tick, raised)
         for state in (tick.snapshot.state, tick.after):
             check_i1(state)
             check_groups(state)
@@ -295,7 +314,7 @@ def test_invariants_hold_in_simulation(case: tuple[Scenario, OrderingPolicy]) ->
 FACTS = (JobSubmitted, JobStarted, JobExited, JobObserved, DeviceObs)
 
 
-@settings(max_examples=60, deadline=None, suppress_health_check=[HealthCheck.too_slow])
+@settings(max_examples=examples(0.3))
 @given(scenarios(), st.data())
 def test_i11_replaying_fact_events_changes_nothing(
     case: tuple[Scenario, OrderingPolicy], data: st.DataObject
@@ -329,7 +348,7 @@ def commands_for(state: State) -> st.SearchStrategy[Event]:
     return st.one_of(simple, st.sampled_from(dev_ids).map(DeviceRemoved)) if dev_ids else simple
 
 
-@settings(max_examples=60, deadline=None, suppress_health_check=[HealthCheck.too_slow])
+@settings(max_examples=examples(0.3))
 @given(scenarios(), st.data())
 def test_i11b_commands_are_idempotent(
     case: tuple[Scenario, OrderingPolicy], data: st.DataObject
