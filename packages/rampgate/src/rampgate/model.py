@@ -142,6 +142,13 @@ class HistoryRecord:
     device_id: DeviceId
     peak: Resources
     lower_bound: bool
+    attempt: int
+
+    @property
+    def record_id(self) -> str:
+        """``job:attempt:device:kind``; stores use it to apply each record at most once."""
+        kind = "lower_bound" if self.lower_bound else "peak"
+        return f"{self.job_id}:{self.attempt}:{self.device_id}:{kind}"
 
 
 @dataclass(frozen=True, slots=True)
@@ -166,7 +173,6 @@ class JobRuntime:
     applied: frozenset[tuple[int, str]] = frozenset()
     last_exit_t: float | None = None
     admitted_free: Mapping[DeviceId, Resources] = field(default_factory=frozen_map)
-    admitted_alone: Mapping[DeviceId, bool] = field(default_factory=frozen_map)
     admitted_estimate: Mapping[DeviceId, Resources | None] = field(default_factory=frozen_map)
     starting_since: float | None = None
     warm_start: float | None = None

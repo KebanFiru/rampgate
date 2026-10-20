@@ -196,7 +196,6 @@ def _fresh_attempt() -> dict[str, Any]:
     """Field values that ``Start`` resets for a new attempt."""
     return {
         "admitted_free": frozen_map(),
-        "admitted_alone": frozen_map(),
         "admitted_estimate": frozen_map(),
         "starting_since": None,
         "warm_start": None,
@@ -236,7 +235,7 @@ def _estimates(rt: JobRuntime) -> Mapping[DeviceId, Resources | None]:
 def _observed_peaks(rt: JobRuntime, *, lower_bound: bool) -> list[HistoryRecord]:
     """History records for every device that was actually observed in this attempt."""
     return [
-        HistoryRecord(rt.id, d, rt.peak.get(d, Resources()), lower_bound)
+        HistoryRecord(rt.id, d, rt.peak.get(d, Resources()), lower_bound, rt.attempt)
         for d in rt.job.devices
         if d in rt.last_obs_t
     ]
@@ -463,7 +462,10 @@ def _learn_from_oom(
     previous estimate. Unaffected dimensions keep ``max(peak, previous estimate)``.
 
     Returns the new learned estimates, lower-bound history records, and whether
-    the job already ran alone at capacity (so growing further is pointless).
+    the evidence says the job cannot fit the device: it OOMed in a dimension in
+    which it was admitted with (almost) the whole device free,
+    ``admitted_free >= capacity * (1 - foreign_tolerance)``. Where the estimate
+    came from does not matter for that decision.
     """
     learned: dict[DeviceId, Resources] = {}
     records: list[HistoryRecord] = []
@@ -487,11 +489,14 @@ def _learn_from_oom(
             if cap[dim] > 0:
                 grown = min(grown, cap[dim])
             new[dim] = max(prev[dim], grown)
-            if prev[dim] > 0 and prev[dim] >= cap[dim] and rt.admitted_alone.get(d, False):
+            had_whole_device = rt.admitted_free.get(d, Resources())[dim] >= cap[dim] * (
+                1 - config.foreign_tolerance
+            )
+            if cap[dim] > 0 and had_whole_device:
                 exceeds_capacity = True
         learned[d] = Resources(new)
         if any(lower.values()):
-            records.append(HistoryRecord(rt.id, d, Resources(lower), lower_bound=True))
+            records.append(HistoryRecord(rt.id, d, Resources(lower), True, rt.attempt))
     return frozen_map(learned), records, exceeds_capacity
 
 
@@ -604,18 +609,6 @@ def _device_observed(state: State, ev: DeviceObserved, config: Config) -> State:
     return replace(state, devices=frozen_map({**state.devices, ev.device_id: ds}))
 
 
-def _is_alone(state: State, device_id: DeviceId, job_id: JobId, config: Config) -> bool:
-    """No other active managed job on the device and negligible foreign usage."""
-    ds = state.devices[device_id]
-    if any(rt.id != job_id and rt.state in ACTIVE_STATES for rt in state.jobs_on(device_id)):
-        return False
-    cap, foreign = ds.capacity, ds.foreign
-    return all(
-        (v < config.foreign_tolerance * cap[dim]) if cap[dim] > 0 else v == 0
-        for dim, v in foreign.items()
-    )
-
-
 def _start(state: State, a: Start, config: Config) -> State:
     rt = _job(state, a.job_id)
     if a.attempt < rt.attempt or (a.attempt, _START) in rt.applied:
@@ -626,11 +619,9 @@ def _start(state: State, a: Start, config: Config) -> State:
         raise _bad(rt, "only a PENDING job can start")
     if set(a.placement) != set(rt.job.placement):
         raise _bad(rt, f"Start placement {list(a.placement)} differs from the job's")
-    alone = {d: _is_alone(state, d, rt.id, config) for d in rt.job.devices}
     fields = _fresh_attempt() | {
         "state": JobState.STARTING,
         "admitted_free": frozen_map(a.admitted_free),
-        "admitted_alone": frozen_map(alone),
         "starting_since": a.issued_at,
         "admitted_estimate": frozen_map(a.estimate),
         "applied": rt.applied | {(a.attempt, _START)},
