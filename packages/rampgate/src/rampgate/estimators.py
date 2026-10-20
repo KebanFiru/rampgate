@@ -35,14 +35,34 @@ class Estimator(Protocol):
     def estimate(self, job: Job, device: Device) -> Resources | None: ...
 
     def record(
-        self, job: Job, device: Device, peak: Resources, *, lower_bound: bool = False
+        self,
+        job: Job,
+        device: Device,
+        peak: Resources,
+        *,
+        lower_bound: bool = False,
+        record_id: str | None = None,
     ) -> None: ...
 
 
 class HistoryStore(Protocol):
+    """Durable peak history. ``put`` must be idempotent by ``(key, device_kind, record_id)``.
+
+    The Engine hands a history record to the estimator before the next ``dump``;
+    after a crash in between, the restored engine hands it over again.
+    """
+
     def get(self, key: str, device_kind: str) -> Resources | None: ...
 
-    def put(self, key: str, device_kind: str, peak: Resources, *, lower_bound: bool) -> None: ...
+    def put(
+        self,
+        key: str,
+        device_kind: str,
+        peak: Resources,
+        *,
+        lower_bound: bool,
+        record_id: str | None = None,
+    ) -> None: ...
 
 
 def default_device_kind(device: Device) -> str:
@@ -50,27 +70,49 @@ def default_device_kind(device: Device) -> str:
 
 
 class InMemoryHistoryStore:
-    """Keeps the component-wise max of everything put per (key, device kind)."""
+    """Keeps the component-wise max of everything put per (key, device kind).
+
+    Records with a ``record_id`` are applied at most once per (key, device kind).
+    """
 
     def __init__(self) -> None:
         self._data: dict[tuple[str, str], Resources] = {}
+        self._applied: set[tuple[str, str, str]] = set()
+        self.puts_applied = 0
 
     def get(self, key: str, device_kind: str) -> Resources | None:
         return self._data.get((key, device_kind))
 
-    def put(self, key: str, device_kind: str, peak: Resources, *, lower_bound: bool) -> None:
+    def put(
+        self,
+        key: str,
+        device_kind: str,
+        peak: Resources,
+        *,
+        lower_bound: bool,
+        record_id: str | None = None,
+    ) -> None:
+        if record_id is not None:
+            if (key, device_kind, record_id) in self._applied:
+                return
+            self._applied.add((key, device_kind, record_id))
         old = self._data.get((key, device_kind))
         self._data[(key, device_kind)] = peak if old is None else old.max(peak)
+        self.puts_applied += 1
 
-    def to_json(self) -> list[list[Any]]:
-        """``[[key, device_kind, peak], ...]``, sorted, for ``json.dumps``."""
-        return [[k, kind, peak.to_json()] for (k, kind), peak in sorted(self._data.items())]
+    def to_json(self) -> dict[str, Any]:
+        """Peaks and applied record ids, sorted, for ``json.dumps``."""
+        return {
+            "peaks": [[k, kind, peak.to_json()] for (k, kind), peak in sorted(self._data.items())],
+            "applied": sorted([list(a) for a in self._applied]),
+        }
 
     @classmethod
-    def from_json(cls, data: Iterable[Any]) -> InMemoryHistoryStore:
+    def from_json(cls, data: Mapping[str, Any]) -> InMemoryHistoryStore:
         store = cls()
-        for key, kind, peak in data:
+        for key, kind, peak in data["peaks"]:
             store._data[(str(key), str(kind))] = Resources.from_json(peak)
+        store._applied = {(str(k), str(kind), str(r)) for k, kind, r in data["applied"]}
         return store
 
 
@@ -102,11 +144,17 @@ class HistoryEstimator:
         return None
 
     def record(
-        self, job: Job, device: Device, peak: Resources, *, lower_bound: bool = False
+        self,
+        job: Job,
+        device: Device,
+        peak: Resources,
+        *,
+        lower_bound: bool = False,
+        record_id: str | None = None,
     ) -> None:
         kind = self.device_kind(device)
         for key in job.fingerprint:
-            self.store.put(key, kind, peak, lower_bound=lower_bound)
+            self.store.put(key, kind, peak, lower_bound=lower_bound, record_id=record_id)
 
 
 class NullEstimator:
@@ -116,7 +164,13 @@ class NullEstimator:
         return None
 
     def record(
-        self, job: Job, device: Device, peak: Resources, *, lower_bound: bool = False
+        self,
+        job: Job,
+        device: Device,
+        peak: Resources,
+        *,
+        lower_bound: bool = False,
+        record_id: str | None = None,
     ) -> None:
         return None
 
@@ -131,7 +185,13 @@ class StaticEstimator:
         return self.mapping.get(job.id, {}).get(device.id)
 
     def record(
-        self, job: Job, device: Device, peak: Resources, *, lower_bound: bool = False
+        self,
+        job: Job,
+        device: Device,
+        peak: Resources,
+        *,
+        lower_bound: bool = False,
+        record_id: str | None = None,
     ) -> None:
         return None
 
@@ -154,4 +214,6 @@ def apply_history(estimator: Estimator, state: State, records: Iterable[HistoryR
         rt = state.jobs.get(rec.job_id)
         ds = state.devices.get(rec.device_id)
         if rt is not None and ds is not None:
-            estimator.record(rt.job, ds.device, rec.peak, lower_bound=rec.lower_bound)
+            estimator.record(
+                rt.job, ds.device, rec.peak, lower_bound=rec.lower_bound, record_id=rec.record_id
+            )
