@@ -7,10 +7,11 @@ from typing import TypeAlias
 
 from rampgate.actions import QueueStopped
 from rampgate.model import DeviceId, GroupId, JobId
-from rampgate.resources import Number
+from rampgate.resources import Number, Resources
 
 __all__ = [
     "AwaitingResume",
+    "BlockedByForeignUsage",
     "DeviceHeldFor",
     "EnginePaused",
     "Explanation",
@@ -77,6 +78,17 @@ class DeviceHeldFor:
 
 
 @dataclass(frozen=True, slots=True)
+class BlockedByForeignUsage:
+    """The estimate would fit if the device had no foreign usage."""
+
+    device_id: DeviceId
+    dim: str
+    need: Number
+    available: Number
+    foreign: Resources
+
+
+@dataclass(frozen=True, slots=True)
 class AwaitingResume:
     """The job is PREEMPTED and waits for ``ResumeRequested``."""
 
@@ -89,5 +101,6 @@ Explanation: TypeAlias = (
     | UnknownEstimateBlocked
     | GangPartiallyBlocked
     | DeviceHeldFor
+    | BlockedByForeignUsage
     | AwaitingResume
 )

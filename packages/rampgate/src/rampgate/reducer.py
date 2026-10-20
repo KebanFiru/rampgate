@@ -16,7 +16,6 @@ Stale, duplicate and out-of-order events are no-ops recorded in
 
 from __future__ import annotations
 
-import json
 from collections.abc import Iterable, Mapping
 from dataclasses import dataclass, replace
 from enum import StrEnum
@@ -36,6 +35,9 @@ from rampgate.actions import (
     UncleanStop,
     UpdateReservation,
     Warn,
+    WarnCleared,
+    is_edge_triggered,
+    key_id,
     warning_key,
 )
 from rampgate.config import Config
@@ -142,6 +144,8 @@ def reduce(state: State, msg: Message, config: Config) -> State:
             return _group_completed(state, msg)
         case Warn():
             return _warn(state, msg)
+        case WarnCleared():
+            return _warn_cleared(state, msg)
         case Requeue() | Fail() | UpdateReservation():
             return _clear(state, msg)
     raise TypeError(f"not an event or action: {msg!r}")
@@ -168,32 +172,7 @@ def _job(state: State, job_id: JobId) -> JobRuntime:
 
 
 def _put(state: State, rt: JobRuntime) -> State:
-    old = state.jobs.get(rt.id)
-    if state.warned and old is not None:
-        state = _prune_warned(state, old, rt)
     return replace(state, jobs=frozen_map({**state.jobs, rt.id: rt}))
-
-
-def _prune_warned(state: State, old: JobRuntime, new: JobRuntime) -> State:
-    """Forget warning keys whose condition can no longer be the same one.
-
-    Candidate warnings of a job end once it leaves PENDING; overcommit
-    warnings of a device end once a reservation on it is released.
-    """
-    left_pending = old.state is JobState.PENDING and new.state is not JobState.PENDING
-    released = {d for d in old.reservation if d not in new.reservation}
-    if not left_pending and not released:
-        return state
-
-    def stale(key: str) -> bool:
-        kind, *rest = json.loads(key)
-        if kind in ("CapacityExceeded", "ForeignUsageHigh"):
-            return left_pending and rest[0] == old.id
-        if kind == "Overcommitted":
-            return rest[0] in released
-        return False
-
-    return replace(state, warned=frozenset(k for k in state.warned if not stale(k)))
 
 
 def _emit(state: State, *actions: Action) -> State:
@@ -218,6 +197,7 @@ def _fresh_attempt() -> dict[str, Any]:
     return {
         "admitted_free": frozen_map(),
         "admitted_alone": frozen_map(),
+        "admitted_estimate": frozen_map(),
         "starting_since": None,
         "warm_start": None,
         "usage": frozen_map(),
@@ -477,7 +457,8 @@ def _learn_from_oom(
 ) -> tuple[Mapping[DeviceId, Resources], list[HistoryRecord], bool]:
     """Rule O, per placement device and affected dimension.
 
-    ``lower_bound = max(peak, previous estimate, admitted_free)`` and
+    ``lower_bound = max(peak, previous estimate, admitted_free)``, plus
+    ``unknown_min_free`` on devices admitted without an estimate, and
     ``new_estimate = min(lower_bound * oom_growth, capacity)``, never below the
     previous estimate. Unaffected dimensions keep ``max(peak, previous estimate)``.
 
@@ -490,8 +471,13 @@ def _learn_from_oom(
     for d in rt.job.devices:
         cap = state.devices[d].capacity
         prev = rt.prev_estimate(d) or Resources()
+        admitted = rt.admitted_estimate.get(d)
+        if admitted is not None:
+            prev = prev.max(admitted)
         base = rt.peak.get(d, Resources()).max(prev)
         full_lb = base.max(rt.admitted_free.get(d, Resources()))
+        if d in rt.admitted_estimate and rt.admitted_estimate[d] is None:
+            full_lb = full_lb.max(config.unknown_min_free_for(cap))
         dims = ev.oom_dims if ev.oom_dims is not None else sorted(full_lb.keys() | cap.keys())
         new = dict(base)
         lower = dict(base)
@@ -646,6 +632,7 @@ def _start(state: State, a: Start, config: Config) -> State:
         "admitted_free": frozen_map(a.admitted_free),
         "admitted_alone": frozen_map(alone),
         "starting_since": a.issued_at,
+        "admitted_estimate": frozen_map(a.estimate),
         "applied": rt.applied | {(a.attempt, _START)},
     }
     rt = replace(rt, **fields)
@@ -706,7 +693,18 @@ def _group_completed(state: State, a: GroupCompleted) -> State:
 
 def _warn(state: State, a: Warn) -> State:
     state = _clear(state, a)
-    state = replace(state, warned=state.warned | {warning_key(a.warning)})
+    kind, key = warning_key(a.warning)
+    if is_edge_triggered(a.warning):
+        active = {**state.active_warnings, key_id(kind, key): a.warning}
+        state = replace(state, active_warnings=frozen_map(active))
+    else:
+        state = replace(state, warned=state.warned | {key_id(kind, key)})
     if isinstance(a.warning, QueueStopped):
         state = replace(state, paused=True, pause_reason=a.warning)
     return state
+
+
+def _warn_cleared(state: State, a: WarnCleared) -> State:
+    k = key_id(a.kind, a.key)
+    active = {i: w for i, w in state.active_warnings.items() if i != k}
+    return replace(state, active_warnings=frozen_map(active))

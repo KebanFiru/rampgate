@@ -9,8 +9,10 @@ steps see the effect of earlier ones within the same tick:
 4. ``MarkStable`` (Rule S);
 5. ``Warn(QueueStopped)`` for STOP_QUEUE failures (it pauses admission);
 6. admission: Rules P and A in policy order, with per-device head-of-line
-   blocking, plus the candidate warnings;
-7. ``Warn(Overcommitted)``;
+   blocking;
+7. edge-triggered warnings: ``Warn`` for conditions that became true and
+   ``WarnCleared`` for those that stopped (``CapacityExceeded``,
+   ``Overcommitted``, ``ForeignUsageHigh``);
 8. ``GroupCompleted``.
 """
 
@@ -32,12 +34,15 @@ from rampgate.actions import (
     Start,
     Stop,
     Warn,
+    WarnCleared,
     WarningKind,
+    key_id,
     warning_key,
 )
 from rampgate.config import Config
 from rampgate.explain import (
     AwaitingResume,
+    BlockedByForeignUsage,
     DeviceHeldFor,
     EnginePaused,
     Explanation,
@@ -143,13 +148,15 @@ class _Tick:
         self.state = snapshot.state
         self.actions: list[Action] = []
         self.explanations: dict[JobId, Explanation] = {}
+        self.admission_evaluated = False
+        self.foreign_blocked: dict[DeviceId, list[JobId]] = {}
 
     def emit(self, action: Action) -> None:
         self.actions.append(action)
         self.state = reduce(self.state, action, self.config)
 
-    def warn(self, warning: WarningKind) -> None:
-        if warning_key(warning) not in self.state.warned:
+    def warn_once(self, warning: WarningKind) -> None:
+        if key_id(*warning_key(warning)) not in self.state.warned:
             self.emit(Warn(warning))
 
     def jobs(self, *states: JobState) -> list[JobRuntime]:
@@ -173,9 +180,9 @@ def decide(snapshot: Snapshot, now: float, config: Config, policy: OrderingPolic
     _mark_stable(tick)
     queue_stops = getattr(policy, "queue_stops", None)
     for group, job_id in queue_stops(tick.state) if queue_stops is not None else ():
-        tick.warn(QueueStopped(group, job_id))
+        tick.warn_once(QueueStopped(group, job_id))
     _admit(tick, policy)
-    _overcommit(tick)
+    _edge_warnings(tick)
     for group, outcome in policy.completed_groups(tick.state):
         if group not in tick.state.completed_groups:
             tick.emit(GroupCompleted(group, outcome))
@@ -219,6 +226,7 @@ def _mark_stable(tick: _Tick) -> None:
 def _admit(tick: _Tick, policy: OrderingPolicy) -> None:
     if tick.state.paused:
         return
+    tick.admission_evaluated = True
     loads = device_loads(tick.state, tick.now, tick.config)
     warming = {d: load.warming_job for d, load in loads.items() if load.warming_job is not None}
     held: dict[DeviceId, JobId] = {}
@@ -251,6 +259,7 @@ def _admit(tick: _Tick, policy: OrderingPolicy) -> None:
                 rt.has_run,
                 {d: loads[d].free for d in devices},
                 tick.now,
+                estimates,
             )
             tick.emit(start)
             for d in devices:
@@ -269,7 +278,9 @@ def _admit(tick: _Tick, policy: OrderingPolicy) -> None:
             warming=warming,
         )
         for d in no_fit:
-            _candidate_warnings(tick, rt, d, estimates[d], loads[d])
+            estimate = estimates[d]
+            if estimate is not None and _blocked_by_foreign(loads[d], estimate):
+                tick.foreign_blocked.setdefault(d, []).append(rt.id)
         if blocking:
             for d in devices if rt.job.is_gang else failing:
                 held.setdefault(d, rt.id)
@@ -277,7 +288,7 @@ def _admit(tick: _Tick, policy: OrderingPolicy) -> None:
 
 def _fits(tick: _Tick, estimate: Resources | None, load: DeviceLoad) -> bool:
     if estimate is None:
-        return tick.config.unknown_min_free.fits_in(load.free)
+        return load.admits(tick.config.unknown_min_free_for(load.capacity))
     return load.admits(estimate)
 
 
@@ -300,24 +311,43 @@ def _blocked_explanation(
         return UnknownEstimateBlocked(d)
     load = loads[d]
     dim = (load.committed + estimate).exceeds(load.capacity)[0]
+    if _blocked_by_foreign(load, estimate):
+        return BlockedByForeignUsage(d, dim, estimate[dim], load.free[dim], load.foreign)
     return InsufficientResources(d, dim, estimate[dim], load.free[dim])
 
 
-def _candidate_warnings(
-    tick: _Tick, rt: JobRuntime, d: DeviceId, estimate: Resources | None, load: DeviceLoad
-) -> None:
-    if estimate is None:
-        return
-    if not estimate.fits_in(load.capacity):
-        tick.warn(CapacityExceeded(rt.job.group, d, estimate, load.capacity, rt.id))
-    elif not load.foreign.is_zero and load.admits(estimate, ignore_foreign=True):
-        tick.warn(ForeignUsageHigh(d, load.foreign, rt.id))
+def _blocked_by_foreign(load: DeviceLoad, estimate: Resources) -> bool:
+    """Not admitted, but it would be if the device had no foreign usage."""
+    return not load.foreign.is_zero and load.admits(estimate, ignore_foreign=True)
 
 
-def _overcommit(tick: _Tick) -> None:
-    for d, load in device_loads(tick.state, tick.now, tick.config).items():
+def _edge_warnings(tick: _Tick) -> None:
+    """Raise warnings whose condition became true, clear those whose condition ended."""
+    current: dict[str, WarningKind] = {}
+
+    def add(w: WarningKind) -> None:
+        current[key_id(*warning_key(w))] = w
+
+    loads = device_loads(tick.state, tick.now, tick.config)
+    for rt in tick.jobs(JobState.PENDING):
+        for d in rt.job.devices:
+            estimate = tick.snapshot.estimate(rt, d)
+            if estimate is not None and not estimate.fits_in(loads[d].capacity):
+                add(CapacityExceeded(rt.job.group, d, estimate, loads[d].capacity, rt.id))
+    for d, load in loads.items():
         if (load.reserved + load.foreign).exceeds(load.capacity):
-            tick.warn(Overcommitted(d, load.reserved, load.available))
+            add(Overcommitted(d, load.reserved, load.available))
+    for d, blocked in sorted(tick.foreign_blocked.items()):
+        add(ForeignUsageHigh(d, loads[d].foreign, tuple(blocked)))
+
+    active = dict(tick.state.active_warnings)
+    if not tick.admission_evaluated:
+        # Paused: the foreign-usage condition was not evaluated, so it keeps its state.
+        active = {k: w for k, w in active.items() if not isinstance(w, ForeignUsageHigh)}
+    for k in sorted(current.keys() - active.keys()):
+        tick.emit(Warn(current[k]))
+    for k in sorted(active.keys() - current.keys()):
+        tick.emit(WarnCleared(*warning_key(active[k])))
 
 
 def _explain_waiting(tick: _Tick, policy: OrderingPolicy) -> None:

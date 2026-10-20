@@ -11,7 +11,7 @@ from typing import TYPE_CHECKING, TypeAlias, TypeVar
 from rampgate.resources import Resources
 
 if TYPE_CHECKING:
-    from rampgate.actions import Action, QueueStopped
+    from rampgate.actions import Action, QueueStopped, WarningKind
     from rampgate.reducer import IgnoredEvent
 
 __all__ = [
@@ -167,6 +167,7 @@ class JobRuntime:
     last_exit_t: float | None = None
     admitted_free: Mapping[DeviceId, Resources] = field(default_factory=frozen_map)
     admitted_alone: Mapping[DeviceId, bool] = field(default_factory=frozen_map)
+    admitted_estimate: Mapping[DeviceId, Resources | None] = field(default_factory=frozen_map)
     starting_since: float | None = None
     warm_start: float | None = None
     usage: Mapping[DeviceId, Resources] = field(default_factory=frozen_map)
@@ -245,6 +246,7 @@ class State:
     ignored_events: tuple[IgnoredEvent, ...] = ()
     completed_groups: frozenset[GroupId] = frozenset()
     warned: frozenset[str] = frozenset()
+    active_warnings: Mapping[str, WarningKind] = field(default_factory=frozen_map)
     pause_reason: QueueStopped | None = None
     removed_devices: frozenset[DeviceId] = frozenset()
 

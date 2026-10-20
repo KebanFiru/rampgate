@@ -3,7 +3,7 @@
 from __future__ import annotations
 
 import math
-from dataclasses import dataclass, field, fields
+from dataclasses import dataclass, fields
 
 from rampgate.resources import Resources
 
@@ -28,14 +28,13 @@ class Config:
     foreign_window_s: float = 10
     foreign_tolerance: float = 0.02
     start_timeout_s: float = 300
-    unknown_min_free: Resources = field(default_factory=Resources)
+    unknown_min_free: Resources | float = 0.10
 
     def __post_init__(self) -> None:
         for f in fields(self):
             value = getattr(self, f.name)
             if f.name == "unknown_min_free":
-                if not isinstance(value, Resources):
-                    raise TypeError("unknown_min_free must be a Resources")
+                _check_unknown_min_free(value)
                 continue
             if f.name == "stable_requires_epoch":
                 if not isinstance(value, bool):
@@ -56,3 +55,18 @@ class Config:
             raise ValueError("min_warmup_s must be <= max_warmup_s")
         if self.foreign_tolerance >= 1:
             raise ValueError("foreign_tolerance must be < 1")
+
+    def unknown_min_free_for(self, capacity: Resources) -> Resources:
+        """``unknown_min_free`` on a device: absolute, or a fraction of its capacity."""
+        if isinstance(self.unknown_min_free, Resources):
+            return self.unknown_min_free
+        return capacity.scale(self.unknown_min_free)
+
+
+def _check_unknown_min_free(value: object) -> None:
+    if isinstance(value, Resources):
+        return
+    if isinstance(value, bool) or not isinstance(value, int | float):
+        raise TypeError("unknown_min_free must be Resources or a fraction of capacity")
+    if not 0 <= value <= 1:
+        raise ValueError(f"unknown_min_free as a fraction must be in [0, 1], got {value!r}")

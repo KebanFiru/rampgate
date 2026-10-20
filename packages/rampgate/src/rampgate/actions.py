@@ -6,11 +6,11 @@ import dataclasses
 import hashlib
 import json
 from collections.abc import Mapping
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 from enum import Enum, StrEnum
 from typing import Any, TypeAlias
 
-from rampgate.model import DeviceId, GroupId, JobId, StopReason
+from rampgate.model import DeviceId, GroupId, JobId, StopReason, frozen_map
 from rampgate.resources import Resources
 
 __all__ = [
@@ -31,8 +31,11 @@ __all__ = [
     "UncleanStop",
     "UpdateReservation",
     "Warn",
+    "WarnCleared",
     "WarningKind",
     "canonical",
+    "is_edge_triggered",
+    "key_id",
     "warning_key",
 ]
 
@@ -93,6 +96,7 @@ class Start(_ActionMixin):
     resume: bool
     admitted_free: Mapping[DeviceId, Resources]
     issued_at: float
+    estimate: Mapping[DeviceId, Resources | None] = field(default_factory=frozen_map)
 
 
 @dataclass(frozen=True, slots=True)
@@ -160,11 +164,11 @@ class Overcommitted:
 
 @dataclass(frozen=True, slots=True)
 class ForeignUsageHigh:
-    """Foreign usage is what keeps a candidate from fitting on a device."""
+    """Foreign usage keeps candidates from fitting on a device; they are listed when raised."""
 
     device_id: DeviceId
     foreign: Resources
-    job_id: JobId
+    blocked_job_ids: tuple[JobId, ...]
 
 
 @dataclass(frozen=True, slots=True)
@@ -188,18 +192,30 @@ WarningKind: TypeAlias = (
 )
 
 
-def warning_key(w: WarningKind) -> str:
-    """Dedup key of a warning: the same key is never emitted twice while it is recorded."""
+EDGE_TRIGGERED: tuple[type, ...] = (CapacityExceeded, Overcommitted, ForeignUsageHigh)
+
+
+def warning_key(w: WarningKind) -> tuple[str, tuple[str, ...]]:
+    """``(kind, key)`` of a warning (SPEC §3.6 warning table)."""
+    kind = type(w).__name__
     match w:
-        case CapacityExceeded() | ForeignUsageHigh():
-            parts: list[Any] = [type(w).__name__, w.job_id, w.device_id]
-        case Overcommitted():
-            parts = [type(w).__name__, w.device_id, canonical(w.reserved)]
+        case CapacityExceeded():
+            return kind, (w.job_id, w.device_id)
+        case Overcommitted() | ForeignUsageHigh():
+            return kind, (w.device_id,)
         case UncleanStop():
-            parts = [type(w).__name__, w.job_id, w.attempt]
+            return kind, (w.job_id, str(w.attempt))
         case QueueStopped():
-            parts = [type(w).__name__, w.group, w.job_id]
-    return json.dumps(parts, sort_keys=True, separators=(",", ":"))
+            return kind, (w.group, w.job_id)
+
+
+def key_id(kind: str, key: tuple[str, ...]) -> str:
+    """A single string for a ``(kind, key)`` pair, used as a mapping key in the state."""
+    return json.dumps([kind, *key], separators=(",", ":"))
+
+
+def is_edge_triggered(w: WarningKind) -> bool:
+    return isinstance(w, EDGE_TRIGGERED)
 
 
 @dataclass(frozen=True, slots=True)
@@ -207,6 +223,22 @@ class Warn(_ActionMixin):
     warning: WarningKind
 
 
+@dataclass(frozen=True, slots=True)
+class WarnCleared(_ActionMixin):
+    """The condition of an edge-triggered warning no longer holds."""
+
+    kind: str
+    key: tuple[str, ...]
+
+
 Action: TypeAlias = (
-    Start | Stop | MarkStable | UpdateReservation | Requeue | Fail | GroupCompleted | Warn
+    Start
+    | Stop
+    | MarkStable
+    | UpdateReservation
+    | Requeue
+    | Fail
+    | GroupCompleted
+    | Warn
+    | WarnCleared
 )
