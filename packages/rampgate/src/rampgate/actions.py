@@ -29,6 +29,7 @@ __all__ = [
     "Start",
     "Stop",
     "UncleanStop",
+    "Unreconciled",
     "UpdateReservation",
     "Warn",
     "WarnCleared",
@@ -180,6 +181,14 @@ class UncleanStop:
 
 
 @dataclass(frozen=True, slots=True)
+class Unreconciled:
+    """After a restart, nobody reported on this running job within ``reconcile_grace_s``."""
+
+    job_id: JobId
+    attempt: int
+
+
+@dataclass(frozen=True, slots=True)
 class QueueStopped:
     """A job of a STOP_QUEUE group failed; reducing this warning pauses the engine."""
 
@@ -188,11 +197,16 @@ class QueueStopped:
 
 
 WarningKind: TypeAlias = (
-    CapacityExceeded | Overcommitted | ForeignUsageHigh | UncleanStop | QueueStopped
+    CapacityExceeded | Overcommitted | ForeignUsageHigh | UncleanStop | QueueStopped | Unreconciled
 )
 
 
-EDGE_TRIGGERED: tuple[type, ...] = (CapacityExceeded, Overcommitted, ForeignUsageHigh)
+EDGE_TRIGGERED: tuple[type, ...] = (
+    CapacityExceeded,
+    Overcommitted,
+    ForeignUsageHigh,
+    Unreconciled,
+)
 
 
 def warning_key(w: WarningKind) -> tuple[str, tuple[str, ...]]:
@@ -203,6 +217,8 @@ def warning_key(w: WarningKind) -> tuple[str, tuple[str, ...]]:
             return kind, (w.job_id, w.device_id)
         case Overcommitted() | ForeignUsageHigh():
             return kind, (w.device_id,)
+        case Unreconciled():
+            return kind, (w.job_id,)
         case UncleanStop():
             return kind, (w.job_id, str(w.attempt))
         case QueueStopped():

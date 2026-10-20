@@ -6,6 +6,7 @@ from collections.abc import Iterable, Mapping
 from dataclasses import replace
 from typing import Any
 
+from rampgate.actions import Action, Unreconciled, Warn, WarnCleared, key_id, warning_key
 from rampgate.config import Config
 from rampgate.decide import Decision, decide
 from rampgate.estimators import Estimator, NullEstimator, apply_history, resolve_estimates
@@ -38,7 +39,7 @@ from rampgate.model import (
     frozen_map,
 )
 from rampgate.policies.base import OrderingPolicy
-from rampgate.reducer import drain, reduce
+from rampgate.reducer import InvalidTransition, drain, reduce
 from rampgate.serialization import UnsupportedSchema, dump_state, load_state
 
 __all__ = ["ENGINE_FORMAT", "Engine"]
@@ -70,6 +71,7 @@ class Engine:
         self._unreconciled: set[JobId] = set()
         self._explanations: Mapping[JobId, Explanation] = frozen_map()
         self._last_snapshot: Snapshot | None = None
+        self._reconcile_since: float | None = None
 
     # -- read-only views ---------------------------------------------------------
 
@@ -93,7 +95,13 @@ class Engine:
         return self._last_snapshot
 
     def unreconciled(self) -> list[JobId]:
-        """Jobs that were running at `load` and that nobody has reported on since."""
+        """Jobs that were running at `load` and that nobody has reported on since.
+
+        Reported by a start or exit, an observation naming the current attempt,
+        or `confirm`. After ``reconcile_grace_s`` (counted from the first tick
+        after `load`) each one raises ``Warn(Unreconciled)``; rampgate never
+        declares a job LOST by itself.
+        """
         return sorted(j for j in self._unreconciled if self._state.jobs[j].state in ACTIVE_STATES)
 
     # -- events ------------------------------------------------------------------
@@ -102,11 +110,30 @@ class Engine:
         self._state = reduce(self._state, event, self.config)
 
     def _fact(self, event: JobStarted | JobExited | JobObserved) -> None:
-        """Apply a fact; one that is not ignored as stale or duplicate reconciles its job."""
+        """Apply a fact and update reconciliation.
+
+        A start or exit that is not ignored as stale or duplicate reconciles its
+        job; so does an observation that names the job's current attempt.
+        """
         ignored_before = len(self._state.ignored_events)
         self._apply(event)
-        if len(self._state.ignored_events) == ignored_before:
+        if isinstance(event, JobObserved):
+            rt = self._state.jobs[event.job_id]
+            if event.attempt is not None and event.attempt == rt.attempt:
+                self._unreconciled.discard(event.job_id)
+        elif len(self._state.ignored_events) == ignored_before:
             self._unreconciled.discard(event.job_id)
+
+    def confirm(self, job_id: JobId, attempt: int) -> None:
+        """The caller has checked that ``attempt`` of ``job_id`` is still running as recorded."""
+        rt = self._state.jobs.get(job_id)
+        if rt is None:
+            raise InvalidTransition(f"unknown job {job_id!r}")
+        if attempt != rt.attempt:
+            raise InvalidTransition(
+                f"job {job_id!r}: confirm for attempt {attempt}, current attempt is {rt.attempt}"
+            )
+        self._unreconciled.discard(job_id)
 
     def apply(self, event: Event) -> None:
         """Apply any input event; facts go through the same path as the dedicated methods."""
@@ -181,7 +208,32 @@ class Engine:
         self._now = now
         self._explanations = decision.explanations
         self._last_snapshot = snapshot
-        return replace(decision, ignored_events=ignored)
+        extra = self._unreconciled_warnings(now)
+        return replace(decision, actions=(*decision.actions, *extra), ignored_events=ignored)
+
+    def _unreconciled_warnings(self, now: float) -> list[Action]:
+        """Edge-triggered ``Warn(Unreconciled)`` after ``reconcile_grace_s`` without news."""
+        if self._unreconciled and self._reconcile_since is None:
+            self._reconcile_since = now
+        overdue = (
+            self._reconcile_since is not None
+            and now - self._reconcile_since >= self.config.reconcile_grace_s
+        )
+        current: dict[str, Unreconciled] = {}
+        if overdue:
+            for job_id in self.unreconciled():
+                w = Unreconciled(job_id, self._state.jobs[job_id].attempt)
+                current[key_id(*warning_key(w))] = w
+        active = {
+            k: w for k, w in self._state.active_warnings.items() if isinstance(w, Unreconciled)
+        }
+        actions: list[Action] = [Warn(current[k]) for k in sorted(current.keys() - active.keys())]
+        actions += [
+            WarnCleared(*warning_key(active[k])) for k in sorted(active.keys() - current.keys())
+        ]
+        for action in actions:
+            self._state = reduce(self._state, action, self.config)
+        return actions
 
     # -- persistence ------------------------------------------------------------------
 

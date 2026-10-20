@@ -340,7 +340,8 @@ def _edge_warnings(tick: _Tick) -> None:
     for d, blocked in sorted(tick.foreign_blocked.items()):
         add(ForeignUsageHigh(d, loads[d].foreign, tuple(blocked)))
 
-    active = dict(tick.state.active_warnings)
+    owned = (CapacityExceeded, Overcommitted, ForeignUsageHigh)
+    active = {k: w for k, w in tick.state.active_warnings.items() if isinstance(w, owned)}
     if not tick.admission_evaluated:
         # Paused: the foreign-usage condition was not evaluated, so it keeps its state.
         active = {k: w for k, w in active.items() if not isinstance(w, ForeignUsageHigh)}

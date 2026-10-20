@@ -28,6 +28,7 @@ class Config:
     foreign_window_s: float = 10
     foreign_tolerance: float = 0.02
     start_timeout_s: float = 300
+    reconcile_grace_s: float = 60
     unknown_min_free: Resources | float = 0.10
 
     def __post_init__(self) -> None:
