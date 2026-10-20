@@ -22,7 +22,11 @@
 - `InMemoryHistoryStore.to_json` / `from_json`; `simulate(..., restart_at=...)` runs through the Engine and can restart mid-run (L3).
 - `Start.estimate`; `unknown_min_free` as a fraction of capacity (default 10 %); edge-triggered warnings with `WarnCleared`; `BlockedByForeignUsage` (L2 follow-up).
 
+- `Engine.confirm`, `Config.reconcile_grace_s` and the edge-triggered `Warn(Unreconciled)`; `HistoryRecord.record_id` and idempotent `HistoryStore.put`; `simulate(restart_at=[...], downtime=[...])` (L3 follow-up).
+
 ### Changed
+- `Fail(EXCEEDS_DEVICE_CAPACITY)` is decided from evidence only: the job OOMed while it had effectively the whole device free (L3 follow-up).
+- Only observations naming the current attempt reconcile a job after a load (L3 follow-up).
 - Unknown-estimate jobs use Rule A's direct comparison against `unknown_min_free` and are refused on overcommitted devices (L2 follow-up).
 - `CapacityExceeded`, `Overcommitted` and `ForeignUsageHigh` are edge-triggered; `ForeignUsageHigh` is keyed by device and lists the blocked jobs (L2 follow-up).
 - `max_lost_retries` now counts retries, like `max_oom_retries` (fails on the 4th consecutive LOST by default) (L2).
