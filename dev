@@ -2,7 +2,8 @@
 # Run the dev/CI toolchain inside Docker; nothing is installed on the host.
 #
 #   ./dev build                 build the dev image
-#   ./dev ci [3.11|3.12|3.13|all]   lint, type-check and test (default: all)
+#   ./dev ci [3.11|3.12|3.13|all]   lint, type-check and test (default: all;
+#                               "all" also runs the zero-dependency check)
 #   ./dev zero-deps             verify the core has zero runtime dependencies
 #   ./dev shell [version]       interactive shell with a synced venv
 #   ./dev run <cmd...>          run an arbitrary command in the container
@@ -34,6 +35,9 @@ case "$cmd" in
         for v in "${versions[@]}"; do
             in_container bash scripts/ci.sh "$v"
         done
+        if [[ "${1:-all}" == all ]]; then
+            in_container bash scripts/check_zero_deps.sh
+        fi
         ;;
     zero-deps)
         in_container bash scripts/check_zero_deps.sh
