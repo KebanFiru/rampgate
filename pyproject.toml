@@ -31,10 +31,12 @@ ignore = [
 [tool.mypy]
 strict = true
 python_version = "3.11"
+mypy_path = "packages/rampgate/tests"
 files = ["packages/rampgate/src", "packages/rampgate-nvml/src", "packages/rampgate-psutil/src", "packages/rampgate-docker/src", "packages/rampgate/tests"]
 
 [tool.pytest.ini_options]
 addopts = "--import-mode=importlib"
+pythonpath = ["packages/rampgate/tests"]
 testpaths = ["packages"]
 
 [tool.coverage.run]
