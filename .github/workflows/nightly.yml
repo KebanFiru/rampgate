@@ -24,3 +24,16 @@ jobs:
         run: ./dev build
       - name: ruff, mypy --strict, pytest + coverage (nightly profile)
         run: ./dev ci ${{ matrix.python }}
+
+  benchmark:
+    name: benchmark acceptance (SPEC §12 L4, 10 seeds)
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: Build dev image
+        run: ./dev build
+      - name: benchmarks/run.py --check (no plots)
+        run: >
+          ./dev run bash -c 'export UV_PROJECT_ENVIRONMENT=/tmp/venv-3.13;
+          uv sync --all-packages --python 3.13 --locked -q &&
+          uv run --no-sync python benchmarks/run.py --check --no-plots --out /tmp/bench'

@@ -3,6 +3,7 @@
 ## Unreleased
 
 ### Added
+- Simulator & benchmark (L4): `Report` (with first-contact OOMs), `run`, `quantile`/`summarize`, baselines `GreedyFree`, `DeclaredReservation`, `Serial` and the ablations as `Strategy` rows (`MAIN`, `ABLATIONS`, `WARM`), `Admission` / `PROBATION` / `measured_free`, `RejectedByAdmission`, executor ground truth (`WorldStats`: lost work, usage integrals, overcommit, timeline), `ckpt_save_s`, foreign-load schedules, `SimJob.after`. `Resources` arithmetic skips re-validation (about 3x faster simulations, identical results).
 - Package skeleton (L0).
 - `Resources`: immutable non-negative resource vector with `+`, `-` (raises on underflow, eps-snapping), `sub(clamp=True)`, `scale`, `max`, `min`, `fits_in`, `exceeds`, `is_zero`, JSON round-trip; `KiB`/`MiB`/`GiB`/`TiB` constants (L0).
 - `Config` with every SPEC §5 threshold, plus `max_lost_retries` and `foreign_tolerance` (L1).

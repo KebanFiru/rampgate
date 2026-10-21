@@ -15,7 +15,7 @@ from __future__ import annotations
 
 import random
 from collections.abc import Callable
-from dataclasses import dataclass
+from dataclasses import dataclass, replace
 from typing import Any
 
 from rampgate import Device, FifoPolicy, Job, OrderingPolicy, Resources, StagePolicy
@@ -238,5 +238,16 @@ _MAKERS: dict[str, Callable[[int], Case]] = {
 NAMES = tuple(_MAKERS)
 
 
-def make(name: str, seed: int) -> Case:
-    return _MAKERS[name](seed)
+def make(name: str, seed: int, *, checkpoint_s: float | None = None) -> Case:
+    """Scenario ``name`` for ``seed``. ``checkpoint_s`` overrides every workload's
+    checkpoint interval (the sensitivity table); by default ramp jobs checkpoint
+    every 120 s and epoch-based jobs once per epoch."""
+    case = _MAKERS[name](seed)
+    if checkpoint_s is None:
+        return case
+    jobs = tuple(
+        replace(sj, workload=replace(sj.workload, checkpoint_every_s=checkpoint_s))  # type: ignore[type-var]
+        for sj in case.scenario.jobs
+    )
+    params = {**case.params, "checkpoint_s": checkpoint_s}
+    return replace(case, scenario=replace(case.scenario, jobs=jobs), params=params)

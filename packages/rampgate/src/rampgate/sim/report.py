@@ -9,8 +9,8 @@ from typing import Any
 
 from rampgate.actions import Start
 from rampgate.estimators import Estimator, HistoryEstimator, InMemoryHistoryStore, NullEstimator
-from rampgate.events import JobSubmitted
-from rampgate.model import DeviceId, JobId, JobState
+from rampgate.events import JobExited, JobSubmitted
+from rampgate.model import DeviceId, ExitKind, JobId, JobState, State
 from rampgate.policies.base import OrderingPolicy
 from rampgate.sim.baselines import Strategy
 from rampgate.sim.executor import TimelineEntry
@@ -29,6 +29,9 @@ class Report:
       (including jobs never submitted because the job they waited for failed).
     - ``oom_count``, ``lost_work_step_s``, ``max_overcommit``: the executor's
       ground truth (`WorldStats`), the overcommit as the max over devices.
+    - ``first_contact_ooms``: OOMs reported to the engine while their device
+      hosted a first-attempt job admitted there with an unknown estimate and
+      still STARTING/WARMING (SPEC §12 L4).
     - ``utilization``: per device and dimension, mean job usage / capacity over
       the run (up to ``max_time`` when censored).
     - ``wait_p50`` / ``wait_p95``: queue wait, from a job's submission to its
@@ -40,6 +43,7 @@ class Report:
     completed: int
     total: int
     oom_count: int
+    first_contact_ooms: int
     lost_work_step_s: float
     utilization: Mapping[DeviceId, Mapping[str, float]]
     wait_p50: float
@@ -62,6 +66,7 @@ class Report:
             "completed": self.completed,
             "total": self.total,
             "oom_count": self.oom_count,
+            "first_contact_ooms": self.first_contact_ooms,
             "lost_work_step_s": self.lost_work_step_s,
             "utilization": self.mean_utilization,
             "wait_p50": finite(self.wait_p50),
@@ -96,6 +101,23 @@ def summarize(values: Sequence[float]) -> tuple[float, float, float]:
     return quantile(values, 0.25), quantile(values, 0.5), quantile(values, 0.75)
 
 
+def _first_contact(before: State, oom: JobExited) -> bool:
+    """SPEC §12 L4: an unknown first-attempt job is ramping on one of the OOM'd devices."""
+    victim = before.jobs.get(oom.job_id)
+    if victim is None:
+        return False
+    for d in victim.job.devices:
+        for rt in before.jobs_on(d):
+            if (
+                rt.attempt == 1
+                and rt.state in (JobState.STARTING, JobState.WARMING)
+                and d in rt.admitted_estimate
+                and rt.admitted_estimate[d] is None
+            ):
+                return True
+    return False
+
+
 def report(trace: Trace, scenario: Scenario) -> Report:
     world = trace.world
     assert world is not None, "trace without world stats"
@@ -106,7 +128,13 @@ def report(trace: Trace, scenario: Scenario) -> Report:
 
     submitted: dict[JobId, float] = {}
     started: dict[JobId, float] = {}
+    first_contact = 0
+    before = State.initial(scenario.devices)
     for tick in trace.ticks:
+        for event in tick.events:
+            if isinstance(event, JobExited) and event.kind is ExitKind.OOM:
+                first_contact += _first_contact(before, event)
+        before = tick.after
         for event in tick.events:
             if isinstance(event, JobSubmitted):
                 submitted.setdefault(event.job.id, tick.now)
@@ -134,6 +162,7 @@ def report(trace: Trace, scenario: Scenario) -> Report:
         completed=sum(1 for rt in final.values() if rt.state is JobState.SUCCEEDED),
         total=len(scenario.jobs),
         oom_count=world.oom_count,
+        first_contact_ooms=first_contact,
         lost_work_step_s=world.lost_work_step_s,
         utilization=utilization,
         wait_p50=quantile(waits, 0.5) if waits else 0.0,

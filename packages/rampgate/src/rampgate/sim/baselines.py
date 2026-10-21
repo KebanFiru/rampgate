@@ -21,10 +21,12 @@ __all__ = [
     "ABLATIONS",
     "BASELINES",
     "MAIN",
+    "PROBATION_ALL",
     "PROBATION_COLD",
     "PROBATION_WARM",
     "STRATEGIES",
     "UNBOUNDED_RETRIES",
+    "WARM",
     "DeclaredReservation",
     "GreedyFree",
     "GreedyFreeRuleO",
@@ -154,16 +156,21 @@ class Strategy:
 
 
 PROBATION_COLD = Strategy("Probation")
+PROBATION_ALL = Strategy("Probation (all)", config=Config(probation="all"))
 PROBATION_WARM = Strategy("Probation (warm)", warm=True)
+WARM = (
+    PROBATION_WARM,
+    Strategy("Probation (all, warm)", config=Config(probation="all"), warm=True),
+)
 BASELINES = (
     Strategy("GreedyFree", GreedyFree(), UNBOUNDED_RETRIES, "null"),
     Strategy("DeclaredReservation", DeclaredReservation(), UNBOUNDED_RETRIES, "null"),
     Strategy("Serial", Serial(), UNBOUNDED_RETRIES, "null"),
 )
-MAIN = (PROBATION_COLD, *BASELINES)
+MAIN = (PROBATION_COLD, PROBATION_ALL, *BASELINES)
 ABLATIONS = (
     Strategy("GreedyFree + Rule O", GreedyFreeRuleO(), UNBOUNDED_RETRIES, "null"),
     Strategy("rampgate - Rule P", ProbationAdmission("rampgate - Rule P", probation=False)),
     Strategy("rampgate - history", estimator="null"),
 )
-STRATEGIES = {s.name: s for s in (*MAIN, *ABLATIONS, PROBATION_WARM)}
+STRATEGIES = {s.name: s for s in (*MAIN, *ABLATIONS, *WARM)}

@@ -65,6 +65,22 @@ class Resources(Mapping[str, Number]):
         self._values = dict(self._items)
         self._hash = hash(self._items)
 
+    @classmethod
+    def _of(cls, values: dict[str, Number]) -> Resources:
+        """Fast path for results of arithmetic on valid `Resources` (no per-value checks).
+
+        Only finiteness is checked (a sum or product can overflow); anything else
+        unusual falls back to the validating constructor, which raises.
+        """
+        if not all(map(math.isfinite, values.values())):
+            return cls(values)
+        self = object.__new__(cls)
+        items = tuple(sorted((d, v) for d, v in values.items() if v != 0))
+        object.__setattr__(self, "_items", items)
+        object.__setattr__(self, "_values", dict(items))
+        object.__setattr__(self, "_hash", hash(items))
+        return self
+
     def __getitem__(self, dim: str) -> Number:
         return self._values.get(dim, 0)
 
@@ -105,7 +121,8 @@ class Resources(Mapping[str, Number]):
     def __add__(self, other: Resources) -> Resources:
         if not isinstance(other, Resources):
             return NotImplemented
-        return Resources({d: self[d] + other[d] for d in self._dims(other)})
+        a, b = self._values, other._values
+        return Resources._of({d: a.get(d, 0) + b.get(d, 0) for d in a.keys() | b.keys()})
 
     def __sub__(self, other: Resources) -> Resources:
         if not isinstance(other, Resources):
@@ -132,7 +149,7 @@ class Resources(Mapping[str, Number]):
                     )
                 diff = 0
             out[d] = diff
-        return Resources(out)
+        return Resources._of(out)
 
     def scale(self, k: Number) -> Resources:
         """Multiply every dimension by ``k`` (finite, non-negative)."""
@@ -140,15 +157,17 @@ class Resources(Mapping[str, Number]):
             raise TypeError(f"scale factor must be int or float, got {type(k).__name__}")
         if not math.isfinite(k) or k < 0:
             raise ValueError(f"scale factor must be finite and non-negative, got {k!r}")
-        return Resources({d: v * k for d, v in self._items})
+        return Resources._of({d: v * k for d, v in self._items})
 
     def max(self, other: Resources) -> Resources:
         """Component-wise maximum. Also usable as ``Resources.max(a, b)``."""
-        return Resources({d: max(self[d], other[d]) for d in self._dims(other)})
+        a, b = self._values, other._values
+        return Resources._of({d: max(a.get(d, 0), b.get(d, 0)) for d in a.keys() | b.keys()})
 
     def min(self, other: Resources) -> Resources:
         """Component-wise minimum. Also usable as ``Resources.min(a, b)``."""
-        return Resources({d: min(self[d], other[d]) for d in self._dims(other)})
+        a, b = self._values, other._values
+        return Resources._of({d: min(a.get(d, 0), b.get(d, 0)) for d in a.keys() | b.keys()})
 
     def fits_in(self, other: Resources) -> bool:
         """True iff every dimension of ``self`` is ``<=`` the same dimension of ``other``."""

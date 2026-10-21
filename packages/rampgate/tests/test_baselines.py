@@ -120,11 +120,20 @@ def test_probation_off_ablation_starts_several_warming_jobs() -> None:
 
 
 def test_registries() -> None:
-    assert [s.name for s in MAIN] == ["Probation", "GreedyFree", "DeclaredReservation", "Serial"]
+    assert [s.name for s in MAIN] == [
+        "Probation",
+        "Probation (all)",
+        "GreedyFree",
+        "DeclaredReservation",
+        "Serial",
+    ]
+    assert MAIN[0].config.probation == "untrusted_only"
+    assert MAIN[1].config.probation == "all"
     assert len(ABLATIONS) == 3
     assert STRATEGIES["Probation (warm)"].warm
+    assert STRATEGIES["Probation (all, warm)"].config.probation == "all"
     assert STRATEGIES["rampgate - history"].estimator == "null"
-    for strategy in (*MAIN[1:], ABLATIONS[0]):
+    for strategy in (*MAIN[2:], ABLATIONS[0]):
         assert strategy.config.max_oom_retries >= 1_000_000
 
 

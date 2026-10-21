@@ -223,3 +223,14 @@ def test_quantile_interpolates_and_handles_inf() -> None:
     assert summarize([1, 2, 3, 4, 5]) == (2, 3, 4)
     with pytest.raises(ValueError):
         quantile([], 0.5)
+
+
+def test_first_contact_ooms_are_counted_separately() -> None:
+    # A known job runs at 60; an unknown job ramps next to it and an OOM follows.
+    known = SimJob(Job("known", {GPU.id: Resources(vram=60)}), flat(60, duration=300))
+    unknown = SimJob(Job("unknown", {GPU.id: None}), flat(50, duration=100), submit_at=60)
+    scenario = Scenario((GPU,), (known, unknown))
+    rep = report(simulate(scenario, FifoPolicy(), config=FAST), scenario)
+    assert rep.oom_count >= 1
+    assert rep.first_contact_ooms == 1  # later attempts are no longer first contact
+    assert rep.metrics()["first_contact_ooms"] == 1
