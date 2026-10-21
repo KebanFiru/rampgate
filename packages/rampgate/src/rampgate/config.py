@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import math
 from dataclasses import dataclass, fields
+from typing import Literal
 
 from rampgate.resources import Resources
 
@@ -30,12 +31,18 @@ class Config:
     start_timeout_s: float = 300
     reconcile_grace_s: float = 60
     unknown_min_free: Resources | float = 0.10
+    # Rule P for jobs without a trusted estimate only (default), or for every job.
+    probation: Literal["untrusted_only", "all"] = "untrusted_only"
 
     def __post_init__(self) -> None:
         for f in fields(self):
             value = getattr(self, f.name)
             if f.name == "unknown_min_free":
                 _check_unknown_min_free(value)
+                continue
+            if f.name == "probation":
+                if value not in ("untrusted_only", "all"):
+                    raise ValueError(f"probation must be 'untrusted_only' or 'all', got {value!r}")
                 continue
             if f.name == "stable_requires_epoch":
                 if not isinstance(value, bool):

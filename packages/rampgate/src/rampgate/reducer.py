@@ -197,6 +197,8 @@ def _fresh_attempt() -> dict[str, Any]:
     return {
         "admitted_free": frozen_map(),
         "admitted_estimate": frozen_map(),
+        "trusted": frozenset(),
+        "stable_at": None,
         "starting_since": None,
         "warm_start": None,
         "usage": frozen_map(),
@@ -648,9 +650,12 @@ def _start(state: State, a: Start, config: Config) -> State:
         raise _bad(rt, "only a PENDING job can start")
     if set(a.placement) != set(rt.job.placement):
         raise _bad(rt, f"Start placement {list(a.placement)} differs from the job's")
+    if any(a.estimate.get(d) is None for d in a.trusted):
+        raise _bad(rt, "a trusted device needs a known estimate in Start.estimate")
     fields = _fresh_attempt() | {
         "state": JobState.STARTING,
         "admitted_free": frozen_map(a.admitted_free),
+        "trusted": a.trusted,
         "starting_since": a.issued_at,
         "admitted_estimate": frozen_map(a.estimate),
         "applied": rt.applied | {(a.attempt, _START)},
@@ -685,6 +690,7 @@ def _mark_stable(state: State, a: MarkStable) -> State:
     rt = replace(
         rt,
         state=JobState.STABLE,
+        stable_at=a.issued_at,
         reservation=frozen_map(a.reservation),
         lost_count=0,
         applied=rt.applied | {(a.attempt, _STABLE)},

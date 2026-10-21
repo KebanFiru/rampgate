@@ -9,6 +9,7 @@ from __future__ import annotations
 
 from collections.abc import Callable
 from dataclasses import replace
+from typing import Any
 
 from hypothesis import given, settings
 from hypothesis import strategies as st
@@ -25,6 +26,8 @@ from rampgate import (
     FailReason,
     FailurePolicy,
     FifoPolicy,
+    HistoryEstimator,
+    InMemoryHistoryStore,
     InvalidTransition,
     Job,
     JobExited,
@@ -78,6 +81,8 @@ CFG = Config(
     preempt_grace_s=5,
 )
 GROUPS = ["g0", "g1", "g2"]
+# Shared fingerprints give later jobs trusted (level 0) or fallback (level 1) estimates.
+FINGERPRINTS: list[tuple[str, ...]] = [(), ("f0",), ("f1",), ("f1", "f0")]
 SETTINGS = settings(max_examples=examples(0.8))
 
 vram = st.integers(1, 95).map(lambda v: Resources(vram=v))
@@ -122,6 +127,7 @@ def scenarios(draw: st.DrawFn) -> tuple[Scenario, OrderingPolicy]:
             group=draw(st.one_of(st.none(), st.sampled_from(GROUPS))),
             position=draw(st.integers(0, 3)),
             priority=draw(st.integers(0, 5)),
+            fingerprint=draw(st.sampled_from(FINGERPRINTS)),
             force=draw(st.booleans().map(lambda b: b and draw(st.integers(0, 9)) == 0)),
         )
         jobs.append(SimJob(job, draw(workloads), submit_at=float(draw(st.integers(0, 60)))))
@@ -156,23 +162,41 @@ def scenarios(draw: st.DrawFn) -> tuple[Scenario, OrderingPolicy]:
     return Scenario(devices, tuple(jobs), commands, foreign, seed), policy
 
 
-def run(scenario: Scenario, policy: OrderingPolicy) -> Trace:
-    return simulate(scenario, policy, config=CFG, max_time=400.0)
+def config_for(scenario: Scenario) -> Config:
+    """Both Rule P modes are exercised: odd seeds use ``probation="all"``."""
+    return replace(CFG, probation="all" if scenario.seed % 2 else "untrusted_only")
+
+
+def run(scenario: Scenario, policy: OrderingPolicy, **kw: Any) -> Trace:
+    estimator = HistoryEstimator(InMemoryHistoryStore())
+    cfg = config_for(scenario)
+    return simulate(scenario, policy, config=cfg, estimator=estimator, max_time=400.0, **kw)
 
 
 # -- per-tick checks ----------------------------------------------------------------------------
 
 
-def check_i1(state: State) -> None:
+def check_i1(state: State, cfg: Config = CFG) -> None:
+    """I1: at most one untrusted STARTING/WARMING job per device (every job with "all")."""
     for d in state.devices:
         warming = [
-            rt.id for rt in state.jobs_on(d) if rt.state in (JobState.STARTING, JobState.WARMING)
+            rt.id
+            for rt in state.jobs_on(d)
+            if rt.state in (JobState.STARTING, JobState.WARMING) and d not in rt.trusted
         ]
         assert len(warming) <= 1, (d, warming)
+        if cfg.probation == "all":
+            assert not any(rt.trusted for rt in state.jobs_on(d))
 
 
-def check_starts(tick: Tick, policy: OrderingPolicy) -> None:
-    """I2, I3, I9, I10 (resume flag) and I15, replaying the decision on its snapshot."""
+def check_starts(
+    tick: Tick, policy: OrderingPolicy, cfg: Config = CFG, *, history: bool = False
+) -> None:
+    """I2, I3, I9, I10 (resume flag) and I15, replaying the decision on its snapshot.
+
+    ``history``: the run used a `HistoryEstimator`, so a sibling of a STABLE job
+    (shared fingerprint key, same device) must start with an estimate (Rule H + P).
+    """
     work = tick.snapshot.state
     order: list[str] | None = None
     started: list[str] = []
@@ -183,14 +207,29 @@ def check_starts(tick: Tick, policy: OrderingPolicy) -> None:
                 order = list(policy.candidates(work, tick.now))
             assert action.placement == rt.job.devices  # I9
             assert action.resume == rt.has_run  # I10
-            loads = device_loads(work, tick.now, CFG)
+            loads = device_loads(work, tick.now, cfg)
+            for d in action.trusted:  # trusted only from the most specific level, no OOM yet
+                assert tick.snapshot.is_trusted(rt, d), (rt.id, d)
+            for d in action.placement:  # Rule H + P: a sibling never starts blind next to it
+                if history and tick.snapshot.estimate(rt, d) is None and rt.job.fingerprint:
+                    for o in work.jobs_on(d):
+                        shared = set(o.job.fingerprint) & set(rt.job.fingerprint)
+                        recorded = (
+                            o.stable_at is not None
+                            and o.stable_at < tick.now
+                            and not o.peak.get(d, Resources()).is_zero
+                        )
+                        assert not (o.state is JobState.STABLE and shared and recorded), (
+                            rt.id,
+                            o.id,
+                        )
             for d in action.placement:  # I2 (unknown estimates are checked with unknown_min_free)
                 estimate = tick.snapshot.estimate(rt, d)
                 if rt.job.force:
                     continue
                 load = loads[d]
                 if estimate is None:
-                    estimate = CFG.unknown_min_free_for(load.capacity)
+                    estimate = cfg.unknown_min_free_for(load.capacity)
                 used = load.reserved + load.warming_usage + load.foreign + estimate
                 for dim, value in used.items():
                     assert value <= load.capacity[dim] * (1 + 1e-9) + 1e-9, (d, dim, used)
@@ -204,13 +243,14 @@ def check_starts(tick: Tick, policy: OrderingPolicy) -> None:
                     shared = set(work.jobs[earlier].job.placement) & set(rt.job.placement)
                     assert not shared or earlier in started, (earlier, rt.id, shared)
             started.append(rt.id)
-        work = reduce(work, action, CFG)
+        work = reduce(work, action, cfg)
 
 
-def check_purity(tick: Tick, policy: OrderingPolicy) -> None:
+def check_purity(tick: Tick, policy: OrderingPolicy, cfg: Config = CFG) -> None:
     """I4 (determinism) and I5 (no duplicate Start/Stop right after applying a decision)."""
-    assert decide(tick.snapshot, tick.now, CFG, policy) == replace(tick.decision, ignored_events=())
-    again = decide(Snapshot(tick.after, tick.snapshot.estimates), tick.now, CFG, policy)
+    assert decide(tick.snapshot, tick.now, cfg, policy) == replace(tick.decision, ignored_events=())
+    snapshot = Snapshot(tick.after, tick.snapshot.estimates, tick.snapshot.trusted)
+    again = decide(snapshot, tick.now, cfg, policy)
     assert not [a for a in again.actions if isinstance(a, Start | Stop)]
 
 
@@ -286,18 +326,19 @@ def check_groups(state: State) -> None:
 @given(scenarios())
 def test_invariants_hold_in_simulation(case: tuple[Scenario, OrderingPolicy]) -> None:
     scenario, policy = case
+    cfg = config_for(scenario)
     trace = run(scenario, policy)
     prev = State.initial(scenario.devices)
     reservations: dict[tuple[str, int, str], Resources] = {}
     raised: dict[str, bool] = {}
     for tick in trace.ticks:
         check_exits(prev, tick)
-        check_starts(tick, policy)
-        check_purity(tick, policy)
+        check_starts(tick, policy, cfg, history=True)
+        check_purity(tick, policy, cfg)
         check_explained(tick)
         check_i16(tick, raised)
         for state in (tick.snapshot.state, tick.after):
-            check_i1(state)
+            check_i1(state, cfg)
             check_groups(state)
             for rt in state.jobs.values():  # I6
                 for d, r in rt.reservation.items():
@@ -308,9 +349,7 @@ def test_invariants_hold_in_simulation(case: tuple[Scenario, OrderingPolicy]) ->
         prev = tick.after
 
     if any(rt.attempt > 1 for rt in trace.final.jobs.values()):  # I14
-        reset = simulate(
-            scenario, policy, config=CFG, max_time=400.0, reset_counters_on_resume=True
-        )
+        reset = run(scenario, policy, reset_counters_on_resume=True)
         assert [t.decision.actions for t in reset.ticks] == [
             t.decision.actions for t in trace.ticks
         ]

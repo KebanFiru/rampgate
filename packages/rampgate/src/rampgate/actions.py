@@ -74,6 +74,8 @@ def canonical(value: Any) -> Any:
         return {str(k): canonical(v) for k, v in sorted(value.items())}
     if isinstance(value, tuple | list):
         return [canonical(v) for v in value]
+    if isinstance(value, frozenset):
+        return sorted(canonical(v) for v in value)
     if value is None or isinstance(value, bool | int | float | str):
         return value
     raise TypeError(f"cannot canonicalize {type(value).__name__}")
@@ -98,6 +100,7 @@ class Start(_ActionMixin):
     admitted_free: Mapping[DeviceId, Resources]
     issued_at: float
     estimate: Mapping[DeviceId, Resources | None] = field(default_factory=frozen_map)
+    trusted: frozenset[DeviceId] = frozenset()
 
 
 @dataclass(frozen=True, slots=True)
@@ -113,6 +116,7 @@ class MarkStable(_ActionMixin):
     job_id: JobId
     attempt: int
     reservation: Mapping[DeviceId, Resources]
+    issued_at: float | None = None  # decide's ``now``; the probation slot is kept until then
 
 
 @dataclass(frozen=True, slots=True)

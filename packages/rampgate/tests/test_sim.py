@@ -6,6 +6,7 @@ from rampgate import (
     CancelRequested,
     Config,
     Device,
+    EstimateResult,
     ExitKind,
     FifoPolicy,
     HistoryEstimator,
@@ -180,7 +181,7 @@ def test_history_makes_the_second_run_reserve_up_front() -> None:
     est = HistoryEstimator(InMemoryHistoryStore())
     first = (SimJob(Job("a", {GPU.id: None}, fingerprint=("m",)), ramp(70, duration=50)),)
     simulate(Scenario((GPU,), first), FifoPolicy(), estimator=est)
-    assert est.estimate(first[0].job, GPU) == Resources(vram=70)
+    assert est.estimate(first[0].job, GPU) == EstimateResult(Resources(vram=70))
     big = SimJob(Job("b", {GPU.id: None}, fingerprint=("m",)), ramp(70, duration=50))
     trace = simulate(Scenario((GPU,), (big,)), FifoPolicy(), estimator=est)
     assert trace.ticks[0].snapshot.estimates["b"][GPU.id] == Resources(vram=70)
@@ -359,3 +360,25 @@ def test_oom_while_alone_fails_even_if_the_device_was_shared_at_start() -> None:
     assert final["b"].state is JobState.SUCCEEDED
     assert final["a"].state is JobState.FAILED
     assert final["a"].oom_count == 1
+
+
+def test_sibling_of_a_template_is_admitted_with_the_running_estimate() -> None:
+    """Rule H + P: the second job of a template never starts blind on the same device."""
+    first = SimJob(Job("first", {GPU.id: None}, fingerprint=("tmpl",)), ramp(40, duration=300))
+    sibling = SimJob(
+        Job("sibling", {GPU.id: None}, fingerprint=("tmpl",)), ramp(40, duration=300), submit_at=1
+    )
+    est = HistoryEstimator(InMemoryHistoryStore())
+    trace = simulate(Scenario((GPU,), (first, sibling)), FifoPolicy(strict=False), estimator=est)
+    starts = {
+        a.job_id: (t.now, a)
+        for t in trace.ticks
+        for a in t.decision.actions
+        if isinstance(a, Start)
+    }
+    stable_at = stable_times(trace, "first")[0]
+    sib_t, sib_start = starts["sibling"]
+    assert sib_t > stable_at  # it waited for the probation slot, plus one tick
+    assert sib_start.estimate[GPU.id] == Resources(vram=40)  # the running record
+    assert sib_start.trusted == frozenset({GPU.id})
+    assert {rt.state for rt in trace.final.jobs.values()} == {JobState.SUCCEEDED}

@@ -126,11 +126,27 @@ class DeviceLoad:
 
 
 def _is_warming_like(rt: JobRuntime) -> bool:
-    """Occupies the probation slot: STARTING, WARMING, or STOPPING before it became stable."""
+    """STARTING, WARMING, or STOPPING before it became stable."""
     return rt.state in _WARMING_LIKE or (rt.state is JobState.STOPPING and not rt.reservation)
 
 
+def _warming_load(rt: JobRuntime, d: DeviceId, config: Config) -> Resources:
+    """``W_j,d`` (SPEC §5): ``max(E * margin, usage)`` for a trusted estimate, otherwise
+    ``max(E, usage)`` with the estimate used at admission (0 if it was unknown)."""
+    usage = rt.usage.get(d, Resources())
+    estimate = rt.admitted_estimate.get(d)
+    if estimate is None:
+        return usage
+    if d in rt.trusted:
+        return usage.max(estimate.scale(config.safety_margin))
+    return usage.max(estimate)
+
+
 def device_loads(state: State, now: float, config: Config) -> dict[DeviceId, DeviceLoad]:
+    """Per device: foreign, stable reservations, warming load and the probation-slot holder.
+
+    ``warming_job`` is the untrusted warming job (Rule P); trusted ones only add load.
+    """
     loads: dict[DeviceId, DeviceLoad] = {}
     for d, ds in sorted(state.devices.items()):
         reserved = Resources()
@@ -138,8 +154,9 @@ def device_loads(state: State, now: float, config: Config) -> dict[DeviceId, Dev
         warming_job: JobId | None = None
         for rt in state.jobs_on(d):
             if _is_warming_like(rt):
-                warming_usage = warming_usage + rt.usage.get(d, Resources())
-                warming_job = warming_job or rt.id
+                warming_usage = warming_usage + _warming_load(rt, d, config)
+                if d not in rt.trusted:
+                    warming_job = warming_job or rt.id
             elif rt.state in (JobState.STABLE, JobState.STOPPING):
                 reserved = reserved + rt.reservation.get(d, Resources())
         loads[d] = DeviceLoad(
@@ -309,7 +326,7 @@ def _mark_stable(tick: _Tick) -> None:
             else:
                 estimate = tick.snapshot.estimate(rt, d)
                 reservation[d] = Resources() if estimate is None else estimate.scale(margin)
-        tick.emit(MarkStable(rt.id, rt.attempt, reservation))
+        tick.emit(MarkStable(rt.id, rt.attempt, reservation, tick.now))
 
 
 def _admit(tick: _Tick, policy: OrderingPolicy, admission: Admission) -> None:
@@ -318,6 +335,14 @@ def _admit(tick: _Tick, policy: OrderingPolicy, admission: Admission) -> None:
     tick.admission_evaluated = True
     loads = device_loads(tick.state, tick.now, tick.config)
     warming = {d: load.warming_job for d, load in loads.items() if load.warming_job is not None}
+    # An untrusted job marked STABLE at ``now`` keeps its probation slot for the rest of
+    # this tick, so the estimator sees its running history record first (Rule P/H).
+    for stable in tick.jobs(JobState.STABLE):
+        if stable.stable_at == tick.now:
+            for d in stable.job.devices:
+                if d not in stable.trusted:
+                    warming.setdefault(d, stable.id)
+    trust_mode = tick.config.probation == "untrusted_only"
     held: dict[DeviceId, JobId] = {}
     blocking = bool(getattr(policy, "head_of_line_blocking", False))
 
@@ -335,7 +360,14 @@ def _admit(tick: _Tick, policy: OrderingPolicy, admission: Admission) -> None:
             continue
 
         estimates = {d: tick.snapshot.estimate(rt, d) for d in devices}
-        probation = [d for d in devices if d in warming] if admission.probation else []
+        trusted = frozenset(
+            d
+            for d in devices
+            if trust_mode and estimates[d] is not None and tick.snapshot.is_trusted(rt, d)
+        )
+        probation = (
+            [d for d in devices if d in warming and d not in trusted] if admission.probation else []
+        )
         no_fit = [
             d
             for d in devices
@@ -360,11 +392,17 @@ def _admit(tick: _Tick, policy: OrderingPolicy, admission: Admission) -> None:
                 {d: loads[d].free for d in devices},
                 tick.now,
                 estimates,
+                trusted,
             )
             tick.emit(start)
             for d in devices:
+                e = estimates[d] or Resources()
+                if d in trusted:
+                    extra = loads[d].warming_usage + e.scale(tick.config.safety_margin)
+                    loads[d] = replace(loads[d], warming_usage=extra)
+                    continue
                 warming[d] = rt.id
-                extra = loads[d].warming_usage + (estimates[d] or Resources())
+                extra = loads[d].warming_usage + e
                 loads[d] = replace(loads[d], warming_usage=extra, warming_job=rt.id)
             continue
 

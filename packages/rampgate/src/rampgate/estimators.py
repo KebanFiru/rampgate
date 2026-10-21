@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 from collections.abc import Callable, Iterable, Mapping
+from dataclasses import dataclass
 from typing import Any, Literal, Protocol
 
 from rampgate.model import (
@@ -19,6 +20,7 @@ from rampgate.model import (
 from rampgate.resources import Resources
 
 __all__ = [
+    "EstimateResult",
     "Estimator",
     "HistoryEstimator",
     "HistoryStore",
@@ -31,8 +33,26 @@ __all__ = [
 ]
 
 
+@dataclass(frozen=True, slots=True)
+class EstimateResult:
+    """An estimate and the index of the fingerprint key that produced it.
+
+    ``level == 0`` is the most specific key (the exact template and config):
+    only such an estimate is *trusted* and lets a job skip probation (SPEC §5).
+    """
+
+    value: Resources
+    level: int = 0
+
+    @property
+    def trusted(self) -> bool:
+        return self.level == 0
+
+
 class Estimator(Protocol):
-    def estimate(self, job: Job, device: Device) -> Resources | None: ...
+    """``estimate`` returns an `EstimateResult` (a bare `Resources` counts as untrusted)."""
+
+    def estimate(self, job: Job, device: Device) -> EstimateResult | Resources | None: ...
 
     def record(
         self,
@@ -144,12 +164,12 @@ class HistoryEstimator:
         self.aggregate = aggregate
         self.device_kind = device_kind
 
-    def estimate(self, job: Job, device: Device) -> Resources | None:
+    def estimate(self, job: Job, device: Device) -> EstimateResult | None:
         kind = self.device_kind(device)
-        for key in job.fingerprint:
+        for level, key in enumerate(job.fingerprint):
             value = self.store.get(key, kind)
             if value is not None:
-                return value
+                return EstimateResult(value, level)
         return None
 
     def record(
@@ -169,7 +189,7 @@ class HistoryEstimator:
 class NullEstimator:
     """Always unknown."""
 
-    def estimate(self, job: Job, device: Device) -> Resources | None:
+    def estimate(self, job: Job, device: Device) -> EstimateResult | None:
         return None
 
     def record(
@@ -185,13 +205,17 @@ class NullEstimator:
 
 
 class StaticEstimator:
-    """Fixed estimates by job id and device id (for tests)."""
+    """Fixed estimates by job id and device id (for tests), all at fingerprint ``level``."""
 
-    def __init__(self, mapping: Mapping[JobId, Mapping[DeviceId, Resources]]) -> None:
+    def __init__(
+        self, mapping: Mapping[JobId, Mapping[DeviceId, Resources]], level: int = 0
+    ) -> None:
         self.mapping = {j: dict(m) for j, m in mapping.items()}
+        self.level = level
 
-    def estimate(self, job: Job, device: Device) -> Resources | None:
-        return self.mapping.get(job.id, {}).get(device.id)
+    def estimate(self, job: Job, device: Device) -> EstimateResult | None:
+        value = self.mapping.get(job.id, {}).get(device.id)
+        return None if value is None else EstimateResult(value, self.level)
 
     def record(
         self,
@@ -207,14 +231,22 @@ class StaticEstimator:
 
 def resolve_estimates(state: State, estimator: Estimator) -> Snapshot:
     """Ask the estimator about every unfinished job, so ``decide`` can stay pure."""
-    estimates = {
-        rt.id: frozen_map(
-            {d: estimator.estimate(rt.job, state.devices[d].device) for d in rt.job.devices}
-        )
-        for rt in sorted(state.jobs.values(), key=lambda rt: rt.submit_seq)
-        if rt.state not in TERMINAL_STATES
-    }
-    return Snapshot(state, frozen_map(estimates))
+    estimates: dict[JobId, Mapping[DeviceId, Resources | None]] = {}
+    trusted: set[tuple[JobId, DeviceId]] = set()
+    for rt in sorted(state.jobs.values(), key=lambda rt: rt.submit_seq):
+        if rt.state in TERMINAL_STATES:
+            continue
+        per_device: dict[DeviceId, Resources | None] = {}
+        for d in rt.job.devices:
+            result = estimator.estimate(rt.job, state.devices[d].device)
+            if isinstance(result, EstimateResult):
+                per_device[d] = result.value
+                if result.trusted:
+                    trusted.add((rt.id, d))
+            else:
+                per_device[d] = result
+        estimates[rt.id] = frozen_map(per_device)
+    return Snapshot(state, frozen_map(estimates), frozenset(trusted))
 
 
 def apply_history(estimator: Estimator, state: State, records: Iterable[HistoryRecord]) -> None:

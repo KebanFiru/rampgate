@@ -4,6 +4,7 @@ import pytest
 
 from rampgate import (
     Device,
+    EstimateResult,
     ExitKind,
     HistoryEstimator,
     HistoryRecord,
@@ -40,29 +41,35 @@ def test_in_memory_store_keeps_max() -> None:
 def test_history_estimator_walks_fingerprint_most_specific_first() -> None:
     est = HistoryEstimator(InMemoryHistoryStore())
     est.record(job("model:gpt2", "family:gpt"), A100, Resources(vram=20))
-    assert est.estimate(job("model:gpt2-xl", "family:gpt"), A100) == Resources(vram=20)
+    assert est.estimate(job("model:gpt2-xl", "family:gpt"), A100) == EstimateResult(
+        Resources(vram=20), 1
+    )
     est.record(job("model:gpt2-xl", "family:gpt"), A100, Resources(vram=60))
-    assert est.estimate(job("model:gpt2", "family:gpt"), A100) == Resources(vram=20)
-    assert est.estimate(job("model:gpt2-xl", "family:gpt"), A100) == Resources(vram=60)
-    assert est.estimate(job("family:gpt"), A100) == Resources(vram=60)
+    assert est.estimate(job("model:gpt2", "family:gpt"), A100) == EstimateResult(
+        Resources(vram=20), 0
+    )
+    assert est.estimate(job("model:gpt2-xl", "family:gpt"), A100) == EstimateResult(
+        Resources(vram=60), 0
+    )
+    assert est.estimate(job("family:gpt"), A100) == EstimateResult(Resources(vram=60), 0)
     assert est.estimate(job(), A100) is None
 
 
 def test_history_estimator_device_kind_from_labels() -> None:
     est = HistoryEstimator(InMemoryHistoryStore())
     est.record(job("k"), A100, Resources(vram=20))
-    assert est.estimate(job("k"), A100b) == Resources(vram=20)
+    assert est.estimate(job("k"), A100b) == EstimateResult(Resources(vram=20), 0)
     assert est.estimate(job("k"), UNLABELED) is None
     custom = HistoryEstimator(InMemoryHistoryStore(), device_kind=lambda d: "all")
     custom.record(job("k"), A100, Resources(vram=1))
-    assert custom.estimate(job("k"), UNLABELED) == Resources(vram=1)
+    assert custom.estimate(job("k"), UNLABELED) == EstimateResult(Resources(vram=1), 0)
 
 
 def test_history_estimator_lower_bounds_raise_the_estimate() -> None:
     est = HistoryEstimator(InMemoryHistoryStore())
     est.record(job("k"), A100, Resources(vram=20))
     est.record(job("k"), A100, Resources(vram=30), lower_bound=True)
-    assert est.estimate(job("k"), A100) == Resources(vram=30)
+    assert est.estimate(job("k"), A100) == EstimateResult(Resources(vram=30), 0)
 
 
 def test_only_max_aggregate() -> None:
@@ -75,10 +82,10 @@ def test_null_and_static_estimators() -> None:
     assert NullEstimator().estimate(j, A100) is None
     NullEstimator().record(j, A100, Resources(vram=1))
     static = StaticEstimator({"j": {A100.id: Resources(vram=7)}})
-    assert static.estimate(j, A100) == Resources(vram=7)
+    assert static.estimate(j, A100) == EstimateResult(Resources(vram=7), 0)
     assert static.estimate(j, A100b) is None
     static.record(j, A100, Resources(vram=1))
-    assert static.estimate(j, A100) == Resources(vram=7)
+    assert static.estimate(j, A100) == EstimateResult(Resources(vram=7), 0)
 
 
 def test_resolve_estimates_covers_unfinished_jobs() -> None:
@@ -96,7 +103,7 @@ def test_apply_history_feeds_success_and_oom_records() -> None:
     assert history == (HistoryRecord("j", GPU, Resources(vram=40), True, 1),)
     apply_history(est, state, history)
     gpu = state.devices[GPU].device
-    assert est.estimate(state.jobs["j"].job, gpu) == Resources(vram=40)
+    assert est.estimate(state.jobs["j"].job, gpu) == EstimateResult(Resources(vram=40), 0)
     apply_history(est, state, [HistoryRecord("ghost", GPU, Resources(vram=1), False, 1)])
 
 

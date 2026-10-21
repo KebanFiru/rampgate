@@ -17,6 +17,7 @@ from rampgate import (
     Config,
     Device,
     Engine,
+    EstimateResult,
     ExitKind,
     FifoPolicy,
     HistoryEstimator,
@@ -170,8 +171,9 @@ def test_engine_lifecycle_through_the_api() -> None:
     assert e.now == 0.0
     e.on_started("a", 1, 1.0)
     e.observe(JobObserved("a", GPU, 2.0, Resources(vram=40), attempt=1))
-    second = e.tick(3.0)  # a becomes stable, b starts
-    assert [type(a).__name__ for a in second.actions] == ["MarkStable", "Start"]
+    second = e.tick(3.0)  # a becomes stable; b waits one tick for a's running record
+    assert [type(a).__name__ for a in second.actions] == ["MarkStable"]
+    assert [type(a).__name__ for a in e.tick(3.5).actions] == ["Start"]
     e.on_exited("a", 1, ExitKind.SUCCESS, 4.0)
     e.update("b", priority=3)
     e.preempt("b")
@@ -224,7 +226,7 @@ def test_engine_tick_hands_history_to_the_estimator_and_reports_ignored_events()
     e.on_exited("a", 1, ExitKind.SUCCESS, 3.0)
     decision = e.tick(4.0)
     assert len(decision.ignored_events) == 1
-    assert est.estimate(job, e.state.devices[GPU].device) == Resources(vram=40)
+    assert est.estimate(job, e.state.devices[GPU].device) == EstimateResult(Resources(vram=40))
     assert e.tick(5.0).ignored_events == ()
 
 

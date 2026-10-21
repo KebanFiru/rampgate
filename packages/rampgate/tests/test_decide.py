@@ -21,6 +21,7 @@ from rampgate import (
     GroupCompleted,
     GroupOutcome,
     InsufficientResources,
+    InvalidTransition,
     JobState,
     MarkStable,
     Overcommitted,
@@ -277,17 +278,24 @@ def test_mark_stable_reservation_and_fallbacks() -> None:
     d.start("g").started("g", t=0.0).observe(1.0, "g", GPU, vram=40)
     (mark,) = of_type(decide_on(d, 2.0), MarkStable)
     assert mark == MarkStable(
-        "g", 1, {GPU: Resources(vram=40).scale(1.15), GPU1: Resources(vram=20).scale(1.15)}
+        "g", 1, {GPU: Resources(vram=40).scale(1.15), GPU1: Resources(vram=20).scale(1.15)}, 2.0
     )
     d2 = Driver(gpus(GPU), cfg).submit("u").start("u").started("u")
     (mark2,) = of_type(decide_on(d2, 2.0), MarkStable)
-    assert mark2 == MarkStable("u", 1, {GPU: Resources()})
+    assert mark2 == MarkStable("u", 1, {GPU: Resources()}, 2.0)
 
 
-def test_newly_stable_job_frees_the_slot_in_the_same_tick() -> None:
+def test_newly_stable_untrusted_job_keeps_the_slot_until_the_next_tick() -> None:
+    """Rule P/H: the estimator must see the running record before a sibling is admitted."""
     cfg = Config(min_warmup_s=0, stable_window_s=0)
     d = Driver(config=cfg).to(JobState.WARMING, "a").observe(1.0, "a", vram=10).submit("b")
-    assert starts(decide_on(d, 2.0)) == ["b"]
+    dec = decide_on(d, 2.0)
+    assert starts(dec) == []
+    assert dec.explanations["b"] == WaitingForWarmup(GPU, "a")
+    apply(d, dec)
+    assert d.rt("a").stable_at == 2.0
+    assert starts(decide_on(d, 2.0)) == []  # I5: the same tick again
+    assert starts(decide_on(d, 3.0)) == ["b"]
 
 
 # -- warnings ------------------------------------------------------------------------------
@@ -455,3 +463,57 @@ def test_duck_typed_policy_defaults_to_no_blocking_and_no_queue_stops() -> None:
     d = Driver(gpus(GPU, GPU1)).submit("a", {GPU1: None}).submit("b", {GPU: Resources(vram=500)})
     dec = decide_on(d, 0.0, _DuckPolicy())  # type: ignore[arg-type]
     assert starts(dec) == ["a"]
+
+
+# -- trusted estimates and Rule P modes (SPEC §5) --------------------------------------------
+
+
+def trusted_snapshot(d: Driver, job: str, vram: float) -> Snapshot:
+    return Snapshot(d.state, {job: {GPU: Resources(vram=vram)}}, frozenset({(job, GPU)}))
+
+
+def test_trusted_job_skips_probation_and_counts_estimate_times_margin() -> None:
+    d = Driver().to(JobState.WARMING, "a").observe(1.0, "a", vram=10).submit("b")
+    dec = decide(trusted_snapshot(d, "b", 20), 2.0, d.config, FifoPolicy(strict=False))
+    (start,) = [a for a in dec.actions if isinstance(a, Start)]
+    assert (start.job_id, start.trusted) == ("b", frozenset({GPU}))
+    apply(d, dec)
+    loads = device_loads(d.state, 2.0, d.config)
+    assert loads[GPU].warming_job == "a"  # b does not take the probation slot
+    assert loads[GPU].warming_usage == Resources(vram=10) + Resources(vram=20).scale(1.15)
+    d.started("b", t=2.0).observe(3.0, "b", vram=30)  # usage above E * margin wins
+    assert device_loads(d.state, 3.0, d.config)[GPU].warming_usage == Resources(vram=40)
+
+
+def test_untrusted_job_waits_next_to_a_trusted_warming_job_only_for_capacity() -> None:
+    d = Driver().submit("b").submit("c")
+    first = decide(trusted_snapshot(d, "b", 50), 0.0, d.config, FifoPolicy(strict=False))
+    # c (unknown) may start next to trusted b: b holds no slot, 100 - 57.5 >= 10 % free.
+    assert starts(first) == ["b", "c"]
+
+
+def test_probation_all_restores_one_warming_job_per_device() -> None:
+    d = Driver(config=Config(probation="all")).to(JobState.WARMING, "a").submit("b")
+    dec = decide(trusted_snapshot(d, "b", 20), 2.0, d.config, FifoPolicy(strict=False))
+    assert of_type(dec, Start) == []
+    assert dec.explanations["b"] == WaitingForWarmup(GPU, "a")
+
+
+def test_fallback_level_and_oomed_jobs_are_untrusted() -> None:
+    d = Driver().to(JobState.WARMING, "a").submit("b")
+    level1 = Snapshot(d.state, {"b": {GPU: Resources(vram=20)}})  # not in `trusted`
+    assert of_type(decide(level1, 2.0, d.config, FifoPolicy(strict=False)), Start) == []
+    d.submit("c").start("c").room(vram=50).exited(ExitKind.OOM, "c")
+    snap = trusted_snapshot(d, "c", 20)
+    assert not snap.is_trusted(d.rt("c"), GPU)
+
+
+def test_config_rejects_unknown_probation_mode() -> None:
+    with pytest.raises(ValueError, match="probation"):
+        Config(probation="some")  # type: ignore[arg-type]
+
+
+def test_start_rejects_trusted_device_without_estimate() -> None:
+    d = Driver().submit()
+    with pytest.raises(InvalidTransition, match="trusted"):
+        d(Start("j", 1, (GPU,), False, {}, 0.0, {GPU: None}, frozenset({GPU})))

@@ -38,6 +38,7 @@ from rampgate.decide import (
 )
 from rampgate.engine import Engine
 from rampgate.estimators import (
+    EstimateResult,
     Estimator,
     HistoryEstimator,
     HistoryStore,
@@ -134,6 +135,7 @@ __all__ = [
     "DeviceState",
     "Engine",
     "EnginePaused",
+    "EstimateResult",
     "Estimator",
     "Event",
     "ExitKind",

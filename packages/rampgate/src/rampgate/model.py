@@ -181,6 +181,8 @@ class JobRuntime:
     last_exit_t: float | None = None
     admitted_free: Mapping[DeviceId, Resources] = field(default_factory=frozen_map)
     admitted_estimate: Mapping[DeviceId, Resources | None] = field(default_factory=frozen_map)
+    trusted: frozenset[DeviceId] = frozenset()
+    stable_at: float | None = None
     starting_since: float | None = None
     warm_start: float | None = None
     usage: Mapping[DeviceId, Resources] = field(default_factory=frozen_map)
@@ -302,6 +304,12 @@ class Snapshot:
     estimates: Mapping[JobId, Mapping[DeviceId, Resources | None]] = field(
         default_factory=frozen_map
     )
+    trusted: frozenset[tuple[JobId, DeviceId]] = frozenset()
+
+    def is_trusted(self, rt: JobRuntime, device_id: DeviceId) -> bool:
+        """SPEC §5: the estimator answered from the most specific fingerprint level and the
+        job has not OOMed. Hints, learned values and fallback levels are untrusted."""
+        return (rt.id, device_id) in self.trusted and rt.oom_count == 0
 
     def estimate(self, rt: JobRuntime, device_id: DeviceId) -> Resources | None:
         """``E_j,d = max(estimator result, declared hint, learned)``, or None if all unknown."""
