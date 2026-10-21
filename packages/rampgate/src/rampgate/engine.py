@@ -8,7 +8,7 @@ from typing import Any
 
 from rampgate.actions import Action, Unreconciled, Warn, WarnCleared, key_id, warning_key
 from rampgate.config import Config
-from rampgate.decide import Decision, decide
+from rampgate.decide import PROBATION, Admission, Decision, decide
 from rampgate.estimators import Estimator, NullEstimator, apply_history, resolve_estimates
 from rampgate.events import (
     CancelRequested,
@@ -62,8 +62,10 @@ class Engine:
         policy: OrderingPolicy,
         estimator: Estimator | None = None,
         config: Config | None = None,
+        admission: Admission = PROBATION,
     ) -> None:
         self.policy = policy
+        self.admission = admission
         self.estimator: Estimator = estimator or NullEstimator()
         self.config = config or Config()
         self._state = State.initial(devices)
@@ -201,7 +203,7 @@ class Engine:
         state, ignored, history = drain(self._state)
         apply_history(self.estimator, state, history)
         snapshot = resolve_estimates(state, self.estimator)
-        decision = decide(snapshot, now, self.config, self.policy)
+        decision = decide(snapshot, now, self.config, self.policy, self.admission)
         for action in decision.actions:
             state = reduce(state, action, self.config)
         self._state = state
@@ -238,7 +240,10 @@ class Engine:
     # -- persistence ------------------------------------------------------------------
 
     def dump(self) -> dict[str, Any]:
-        """Versioned, JSON-serializable engine state (policy, estimator, config excluded)."""
+        """Versioned, JSON-serializable engine state.
+
+        The policy, estimator, config and admission are not part of it.
+        """
         return {
             "format": ENGINE_FORMAT,
             "schema_version": _ENGINE_SCHEMA,
@@ -254,6 +259,7 @@ class Engine:
         policy: OrderingPolicy,
         estimator: Estimator | None = None,
         config: Config | None = None,
+        admission: Admission = PROBATION,
     ) -> Engine:
         """Restore a dumped engine. Every job that was running is then *unreconciled*.
 
@@ -264,7 +270,7 @@ class Engine:
             raise UnsupportedSchema("not a rampgate engine dump")
         if data.get("schema_version") != _ENGINE_SCHEMA:
             raise UnsupportedSchema(f"unsupported engine schema {data.get('schema_version')!r}")
-        engine = cls((), policy, estimator, config)
+        engine = cls((), policy, estimator, config, admission)
         engine._state = load_state(data["state"])
         now = data.get("now")
         engine._now = None if now is None else float(now)

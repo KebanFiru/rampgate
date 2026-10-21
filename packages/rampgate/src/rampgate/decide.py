@@ -1,4 +1,4 @@
-"""``decide(snapshot, now, config, policy) -> Decision``: pure admission (SPEC §5).
+"""``decide(snapshot, now, config, policy, admission) -> Decision``: pure admission (SPEC §5).
 
 Work is done in a fixed order on a local working copy of the state, so later
 steps see the effect of earlier ones within the same tick:
@@ -8,8 +8,10 @@ steps see the effect of earlier ones within the same tick:
 3. ``Stop`` for jobs with a stop request;
 4. ``MarkStable`` (Rule S);
 5. ``Warn(QueueStopped)`` for STOP_QUEUE failures (it pauses admission);
-6. admission: Rules P and A in policy order, with per-device head-of-line
-   blocking;
+6. admission in policy order, with per-device head-of-line blocking. The
+   `Admission` decides whether a candidate fits a device and whether Rule P's
+   one-warming-job slot applies; the default, `PROBATION`, is Rules P and A.
+   Baselines in ``rampgate.sim.baselines`` swap only this step;
 7. edge-triggered warnings: ``Warn`` for conditions that became true and
    ``WarnCleared`` for those that stopped (``CapacityExceeded``,
    ``Overcommitted``, ``ForeignUsageHigh``);
@@ -20,6 +22,7 @@ from __future__ import annotations
 
 from collections.abc import Mapping
 from dataclasses import dataclass, field, replace
+from typing import Protocol
 
 from rampgate.actions import (
     Action,
@@ -52,6 +55,7 @@ from rampgate.explain import (
     WaitingForWarmup,
 )
 from rampgate.model import (
+    ACTIVE_STATES,
     DeviceId,
     JobId,
     JobRuntime,
@@ -65,7 +69,16 @@ from rampgate.reducer import IgnoredEvent, reduce
 from rampgate.resources import Resources
 from rampgate.stability import is_stable
 
-__all__ = ["Decision", "DeviceLoad", "decide", "device_loads"]
+__all__ = [
+    "PROBATION",
+    "Admission",
+    "Decision",
+    "DeviceLoad",
+    "ProbationAdmission",
+    "decide",
+    "device_loads",
+    "measured_free",
+]
 
 _WARMING_LIKE = (JobState.STARTING, JobState.WARMING)
 
@@ -138,6 +151,75 @@ def device_loads(state: State, now: float, config: Config) -> dict[DeviceId, Dev
     return loads
 
 
+def measured_free(state: State, device_id: DeviceId, now: float, config: Config) -> Resources:
+    """``C - F - sum(last observed usage of active jobs)``, clamped at 0.
+
+    What a naive scheduler sees as free: no reservations, no probation; a job
+    that has not reported usage yet counts as 0.
+    """
+    ds = state.devices[device_id]
+    used = ds.foreign_at(now, config.foreign_window_s)
+    for rt in state.jobs_on(device_id):
+        if rt.state in ACTIVE_STATES:
+            used = used + rt.usage.get(device_id, Resources())
+    return ds.capacity.sub(used, clamp=True)
+
+
+class Admission(Protocol):
+    """The admission step of `decide`: everything else is shared by every strategy.
+
+    ``probation``: whether Rule P applies (at most one STARTING/WARMING job per
+    device). ``fits``: whether ``rt`` may start on ``device_id`` this tick
+    (``force`` jobs skip it);
+    ``state`` already includes the starts made earlier in the tick and ``load``
+    their estimates.
+    """
+
+    @property
+    def name(self) -> str: ...
+
+    @property
+    def probation(self) -> bool: ...
+
+    def fits(
+        self,
+        rt: JobRuntime,
+        device_id: DeviceId,
+        *,
+        estimate: Resources | None,
+        load: DeviceLoad,
+        state: State,
+        now: float,
+        config: Config,
+    ) -> bool: ...
+
+
+@dataclass(frozen=True, slots=True)
+class ProbationAdmission:
+    """rampgate's own admission: Rule A, optionally without Rule P (an ablation)."""
+
+    name: str = "Probation"
+    probation: bool = True
+
+    def fits(
+        self,
+        rt: JobRuntime,
+        device_id: DeviceId,
+        *,
+        estimate: Resources | None,
+        load: DeviceLoad,
+        state: State,
+        now: float,
+        config: Config,
+    ) -> bool:
+        if estimate is None:
+            return load.admits(config.unknown_min_free_for(load.capacity))
+        return load.admits(estimate)
+
+
+PROBATION: Admission = ProbationAdmission()
+
+
 class _Tick:
     """Mutable scratch space for one call of ``decide``; never escapes it."""
 
@@ -166,8 +248,14 @@ class _Tick:
         )
 
 
-def decide(snapshot: Snapshot, now: float, config: Config, policy: OrderingPolicy) -> Decision:
-    """Pure: the same snapshot, ``now``, config and policy always give the same decision.
+def decide(
+    snapshot: Snapshot,
+    now: float,
+    config: Config,
+    policy: OrderingPolicy,
+    admission: Admission = PROBATION,
+) -> Decision:
+    """Pure: the same snapshot, ``now``, config, policy and admission give the same decision.
 
     ``policy.head_of_line_blocking`` defaults to False and ``policy.queue_stops``
     to "none" when a duck-typed policy does not define them.
@@ -181,7 +269,7 @@ def decide(snapshot: Snapshot, now: float, config: Config, policy: OrderingPolic
     queue_stops = getattr(policy, "queue_stops", None)
     for group, job_id in queue_stops(tick.state) if queue_stops is not None else ():
         tick.warn_once(QueueStopped(group, job_id))
-    _admit(tick, policy)
+    _admit(tick, policy, admission)
     _edge_warnings(tick)
     for group, outcome in policy.completed_groups(tick.state):
         if group not in tick.state.completed_groups:
@@ -223,7 +311,7 @@ def _mark_stable(tick: _Tick) -> None:
         tick.emit(MarkStable(rt.id, rt.attempt, reservation))
 
 
-def _admit(tick: _Tick, policy: OrderingPolicy) -> None:
+def _admit(tick: _Tick, policy: OrderingPolicy, admission: Admission) -> None:
     if tick.state.paused:
         return
     tick.admission_evaluated = True
@@ -246,9 +334,20 @@ def _admit(tick: _Tick, policy: OrderingPolicy) -> None:
             continue
 
         estimates = {d: tick.snapshot.estimate(rt, d) for d in devices}
-        probation = [d for d in devices if d in warming]
+        probation = [d for d in devices if d in warming] if admission.probation else []
         no_fit = [
-            d for d in devices if not rt.job.force and not _fits(tick, estimates[d], loads[d])
+            d
+            for d in devices
+            if not rt.job.force
+            and not admission.fits(
+                rt,
+                d,
+                estimate=estimates[d],
+                load=loads[d],
+                state=tick.state,
+                now=tick.now,
+                config=tick.config,
+            )
         ]
 
         if not probation and not no_fit:
@@ -284,12 +383,6 @@ def _admit(tick: _Tick, policy: OrderingPolicy) -> None:
         if blocking:
             for d in devices if rt.job.is_gang else failing:
                 held.setdefault(d, rt.id)
-
-
-def _fits(tick: _Tick, estimate: Resources | None, load: DeviceLoad) -> bool:
-    if estimate is None:
-        return load.admits(tick.config.unknown_min_free_for(load.capacity))
-    return load.admits(estimate)
 
 
 def _blocked_explanation(

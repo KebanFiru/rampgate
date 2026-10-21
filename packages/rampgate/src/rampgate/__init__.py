@@ -26,7 +26,16 @@ from rampgate.actions import (
     warning_key,
 )
 from rampgate.config import Config
-from rampgate.decide import Decision, DeviceLoad, decide, device_loads
+from rampgate.decide import (
+    PROBATION,
+    Admission,
+    Decision,
+    DeviceLoad,
+    ProbationAdmission,
+    decide,
+    device_loads,
+    measured_free,
+)
 from rampgate.engine import Engine
 from rampgate.estimators import (
     Estimator,
@@ -102,9 +111,11 @@ __version__ = "0.1.0.dev0"
 
 __all__ = [
     "ACTIVE_STATES",
+    "PROBATION",
     "TERMINAL_STATES",
     "UNSET",
     "Action",
+    "Admission",
     "AwaitingResume",
     "BasePolicy",
     "BlockedByForeignUsage",
@@ -165,6 +176,7 @@ __all__ = [
     "Paused",
     "PreemptRequested",
     "PriorityPolicy",
+    "ProbationAdmission",
     "QueueStopped",
     "Requeue",
     "RequeueReason",
@@ -200,6 +212,7 @@ __all__ = [
     "is_stable",
     "key_id",
     "load_state",
+    "measured_free",
     "reduce",
     "resolve_estimates",
     "warning_key",
