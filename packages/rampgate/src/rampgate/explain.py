@@ -18,6 +18,7 @@ __all__ = [
     "GangPartiallyBlocked",
     "GroupBarrier",
     "InsufficientResources",
+    "RejectedByAdmission",
     "UnknownEstimateBlocked",
     "WaitingForWarmup",
 ]
@@ -89,6 +90,14 @@ class BlockedByForeignUsage:
 
 
 @dataclass(frozen=True, slots=True)
+class RejectedByAdmission:
+    """A non-default admission (a benchmark baseline) refused the device by its own rule."""
+
+    device_id: DeviceId
+    admission: str
+
+
+@dataclass(frozen=True, slots=True)
 class AwaitingResume:
     """The job is PREEMPTED and waits for ``ResumeRequested``."""
 
@@ -102,5 +111,6 @@ Explanation: TypeAlias = (
     | GangPartiallyBlocked
     | DeviceHeldFor
     | BlockedByForeignUsage
+    | RejectedByAdmission
     | AwaitingResume
 )

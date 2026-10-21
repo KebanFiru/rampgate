@@ -3,11 +3,12 @@
 from __future__ import annotations
 
 import json
+import math
 from collections.abc import Mapping, Sequence
 from dataclasses import dataclass, field
 
 from rampgate.config import Config
-from rampgate.decide import Decision
+from rampgate.decide import PROBATION, Admission, Decision
 from rampgate.engine import Engine
 from rampgate.estimators import Estimator, NullEstimator
 from rampgate.events import Event, JobExited, JobStarted, JobSubmitted
@@ -17,6 +18,7 @@ from rampgate.model import (
     DeviceId,
     ExitKind,
     Job,
+    JobId,
     JobState,
     Snapshot,
     State,
@@ -24,9 +26,8 @@ from rampgate.model import (
 )
 from rampgate.policies.base import OrderingPolicy
 from rampgate.reducer import InvalidTransition
-from rampgate.resources import Resources
 from rampgate.sim.clock import VirtualClock
-from rampgate.sim.executor import SimExecutor
+from rampgate.sim.executor import ForeignLoad, SimExecutor, WorldStats
 from rampgate.sim.workloads import Workload
 
 __all__ = ["Command", "Scenario", "SimJob", "Tick", "Trace", "simulate"]
@@ -34,9 +35,17 @@ __all__ = ["Command", "Scenario", "SimJob", "Tick", "Trace", "simulate"]
 
 @dataclass(frozen=True, slots=True)
 class SimJob:
+    """A job of a scenario.
+
+    ``after``: submitted only once that job SUCCEEDED (and ``submit_at`` is due),
+    like an on_finish hook. If that job ends any other way, this one is never
+    submitted (and is listed in `Trace.dropped`).
+    """
+
     job: Job
     workload: Workload
     submit_at: float = 0.0
+    after: JobId | None = None
 
 
 @dataclass(frozen=True, slots=True)
@@ -52,7 +61,7 @@ class Scenario:
     devices: tuple[Device, ...]
     jobs: tuple[SimJob, ...]
     commands: tuple[Command, ...] = ()
-    foreign: Mapping[DeviceId, Resources] = field(default_factory=frozen_map)
+    foreign: Mapping[DeviceId, ForeignLoad] = field(default_factory=frozen_map)
     seed: int = 0
 
 
@@ -70,8 +79,19 @@ class Tick:
 
 @dataclass(frozen=True, slots=True)
 class Trace:
+    """What happened: every tick, the dumps taken for restarts, and the world's ground truth.
+
+    ``finished``: every submitted job is terminal and nothing is left to submit;
+    otherwise the run was cut at ``max_time``. ``dropped``: jobs never submitted
+    because the job they waited for did not succeed.
+    """
+
     ticks: tuple[Tick, ...]
     dumps: tuple[str, ...] = ()
+    world: WorldStats | None = None
+    finished: bool = True
+    max_time: float = math.inf
+    dropped: tuple[JobId, ...] = ()
 
     @property
     def final(self) -> State:
@@ -110,14 +130,37 @@ def _reconcile(engine: Engine, executor: SimExecutor) -> list[Event]:
 
 
 def _feed(
-    engine: Engine, now: float, pending_jobs: list[SimJob], pending_cmds: list[Command]
+    engine: Engine,
+    now: float,
+    pending_jobs: list[SimJob],
+    pending_cmds: list[Command],
+    dropped: list[JobId],
 ) -> tuple[list[Event], list[Event], list[Event]]:
-    """Submit due jobs and apply due commands; returns (submitted, commands, rejected)."""
+    """Submit due jobs and apply due commands; returns (submitted, commands, rejected).
+
+    A job with ``after`` waits for that job to succeed; it is dropped (and so are
+    jobs waiting for it, on later ticks) if that job ends any other way.
+    """
+    jobs = engine.state.jobs
     submitted: list[Event] = []
-    while pending_jobs and pending_jobs[0].submit_at <= now:
-        job = pending_jobs.pop(0).job
-        engine.submit(job, t=now)
-        submitted.append(JobSubmitted(job, t=now))
+    for sj in list(pending_jobs):
+        if sj.submit_at > now:
+            break
+        if sj.after is not None:
+            parent = jobs.get(sj.after)
+            if parent is None:
+                waiting = sj.after not in dropped  # the parent is not submitted yet
+            else:
+                waiting = parent.state not in TERMINAL_STATES
+            if waiting:
+                continue
+            if parent is None or parent.state is not JobState.SUCCEEDED:
+                pending_jobs.remove(sj)
+                dropped.append(sj.job.id)
+                continue
+        pending_jobs.remove(sj)
+        engine.submit(sj.job, t=now)
+        submitted.append(JobSubmitted(sj.job, t=now))
     commands: list[Event] = []
     rejected: list[Event] = []
     while pending_cmds and pending_cmds[0].at <= now:
@@ -136,15 +179,20 @@ def simulate(
     *,
     config: Config | None = None,
     estimator: Estimator | None = None,
+    admission: Admission = PROBATION,
     dt: float = 1.0,
     max_time: float = 10_000.0,
     start_delay_s: float = 1.0,
     stop_delay_s: float = 1.0,
+    ckpt_save_s: float = 5.0,
     reset_counters_on_resume: bool = False,
     restart_at: float | Sequence[float] | None = None,
     downtime: Sequence[tuple[float, float]] = (),
 ) -> Trace:
     """Run ``scenario`` until every job is finished or ``max_time`` is reached.
+
+    ``admission`` picks rampgate's own admission (the default) or a baseline
+    (``rampgate.sim.baselines``); everything else is the same Engine.
 
     Each tick: the executor reports what happened, submissions and commands due
     are added, the engine ticks, and its actions go to the executor. Commands
@@ -169,22 +217,30 @@ def simulate(
         foreign=scenario.foreign,
         start_delay_s=start_delay_s,
         stop_delay_s=stop_delay_s,
+        ckpt_save_s=ckpt_save_s,
         reset_counters_on_resume=reset_counters_on_resume,
         seed=scenario.seed,
     )
     clock = VirtualClock(dt)
-    engine: Engine | None = Engine(scenario.devices, policy, estimator, config)
+    engine: Engine | None = Engine(scenario.devices, policy, estimator, config, admission)
     pending_jobs = sorted(scenario.jobs, key=lambda sj: (sj.submit_at, sj.job.id))
     pending_cmds = sorted(scenario.commands, key=lambda c: c.at)
     restarts = _times(restart_at)
     windows = sorted(downtime)
     dumps: list[str] = []
+    dropped: list[JobId] = []
     saved: str | None = None
     ticks: list[Tick] = []
     now = clock.now
 
     def load(data: str) -> Engine:
-        return Engine.load(json.loads(data), policy=policy, estimator=estimator, config=config)
+        return Engine.load(
+            json.loads(data),
+            policy=policy,
+            estimator=estimator,
+            config=config,
+            admission=admission,
+        )
 
     while True:
         if windows and engine is not None and now >= windows[0][0]:
@@ -206,7 +262,7 @@ def simulate(
             for event in facts:
                 engine.apply(event)
 
-        submitted, commands, rejected = _feed(engine, now, pending_jobs, pending_cmds)
+        submitted, commands, rejected = _feed(engine, now, pending_jobs, pending_cmds, dropped)
 
         while restarts and now >= restarts[0]:
             restarts.pop(0)
@@ -223,8 +279,19 @@ def simulate(
             Tick(now, (*facts, *submitted, *commands), tuple(rejected), snapshot, decision, state)
         )
 
-        finished = all(rt.state in TERMINAL_STATES for rt in state.jobs.values())
-        if (finished and not pending_jobs and not pending_cmds) or now >= max_time:
+        finished = (
+            not pending_jobs
+            and not pending_cmds
+            and all(rt.state in TERMINAL_STATES for rt in state.jobs.values())
+        )
+        if finished or now >= max_time:
             break
         now = clock.advance()
-    return Trace(tuple(ticks), tuple(dumps))
+    return Trace(
+        tuple(ticks),
+        tuple(dumps),
+        world=executor.stats(),
+        finished=finished,
+        max_time=max_time,
+        dropped=tuple(dropped),
+    )

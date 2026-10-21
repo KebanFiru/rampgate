@@ -51,6 +51,7 @@ from rampgate.explain import (
     Explanation,
     GangPartiallyBlocked,
     InsufficientResources,
+    RejectedByAdmission,
     UnknownEstimateBlocked,
     WaitingForWarmup,
 )
@@ -375,6 +376,7 @@ def _admit(tick: _Tick, policy: OrderingPolicy, admission: Admission) -> None:
             estimates=estimates,
             loads=loads,
             warming=warming,
+            admission=admission,
         )
         for d in no_fit:
             estimate = estimates[d]
@@ -393,12 +395,15 @@ def _blocked_explanation(
     estimates: Mapping[DeviceId, Resources | None],
     loads: Mapping[DeviceId, DeviceLoad],
     warming: Mapping[DeviceId, JobId],
+    admission: Admission,
 ) -> Explanation:
     if rt.job.is_gang and len(failing) < len(rt.job.placement):
         return GangPartiallyBlocked(tuple(failing))
     if probation:
         return WaitingForWarmup(probation[0], warming[probation[0]])
     d = failing[0]
+    if not isinstance(admission, ProbationAdmission):
+        return RejectedByAdmission(d, admission.name)
     estimate = estimates[d]
     if estimate is None:
         return UnknownEstimateBlocked(d)

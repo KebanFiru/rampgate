@@ -73,6 +73,7 @@ from rampgate.explain import (
     GangPartiallyBlocked,
     GroupBarrier,
     InsufficientResources,
+    RejectedByAdmission,
     UnknownEstimateBlocked,
     WaitingForWarmup,
 )
@@ -178,6 +179,7 @@ __all__ = [
     "PriorityPolicy",
     "ProbationAdmission",
     "QueueStopped",
+    "RejectedByAdmission",
     "Requeue",
     "RequeueReason",
     "Resources",
