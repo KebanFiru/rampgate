@@ -252,7 +252,7 @@ def test_lost_requeues_without_oom_accounting(state: JobState) -> None:
     assert rt.oom_count == before.oom_count
     assert rt.learned == before.learned
     assert rt.reservation == {}
-    assert d.state.history_records == ()
+    assert all(r.running for r in d.state.history_records)  # LOST records nothing itself
     (requeue,) = d.state.outbox
     assert requeue == Requeue("j", 2, {GPU: None}, RequeueReason.LOST)
     assert d.start_action().resume
@@ -580,7 +580,7 @@ def test_drain_takes_ignored_and_history() -> None:
     d = Driver().to(JobState.SUCCEEDED).submit("j")
     state, ignored, history = drain(d.state)
     assert [i.reason for i in ignored] == [IgnoreReason.DUPLICATE]
-    assert len(history) == 1
+    assert [r.kind for r in history] == ["running", "peak"]
     assert state.ignored_events == ()
     assert state.history_records == ()
     assert state.jobs == d.state.jobs

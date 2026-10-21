@@ -411,8 +411,32 @@ def test_crash_between_put_and_dump_applies_history_once() -> None:
     assert store.puts_applied == 2
     assert store.get("m", GPU) == Resources(vram=40)
     copy = InMemoryHistoryStore.from_json(json.loads(json.dumps(store.to_json())))
+    assert copy.to_json() == store.to_json()
+    copy.put("m", GPU, Resources(vram=40), lower_bound=False, record_id=f"a:1:{GPU}:peak")
+    assert copy.puts_applied == 0  # the same record again changes nothing
+    # A record id is max-merged: a larger value with the same id raises it (Rule H, §7).
     copy.put("m", GPU, Resources(vram=99), lower_bound=False, record_id=f"a:1:{GPU}:peak")
-    assert copy.get("m", GPU) == Resources(vram=40)
+    assert copy.get("m", GPU) == Resources(vram=99)
+
+
+def test_store_max_merge_is_idempotent_and_order_independent() -> None:
+    puts = [Resources(vram=10, ram=50), Resources(vram=30, ram=5), Resources(vram=20)]
+    results = []
+    for order in (puts, puts[::-1], [*puts, *puts]):
+        store = InMemoryHistoryStore()
+        for peak in order:
+            store.put("k", GPU, peak, lower_bound=True, record_id="r")
+        results.append(store.to_json())
+    assert results[0] == results[1] == results[2]
+    assert results[0]["applied"] == [["k", GPU, "r", {"ram": 50, "vram": 30}]]
+
+
+def test_store_loads_the_l3_json_format() -> None:
+    old = {"peaks": [["k", GPU, {"vram": 4}]], "applied": [["k", GPU, "r"]]}
+    store = InMemoryHistoryStore.from_json(old)
+    assert store.get("k", GPU) == Resources(vram=4)
+    store.put("k", GPU, Resources(vram=2), lower_bound=False, record_id="r")
+    assert store.get("k", GPU) == Resources(vram=4)
 
 
 # -- restarts and downtime (L3 follow-up) ----------------------------------------------------------

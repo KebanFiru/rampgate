@@ -143,12 +143,19 @@ class HistoryRecord:
     peak: Resources
     lower_bound: bool
     attempt: int
+    running: bool = False
+
+    @property
+    def kind(self) -> str:
+        """``peak`` (SUCCESS), ``lower_bound`` (OOM or stop) or ``running`` (STABLE, Rule H)."""
+        if self.running:
+            return "running"
+        return "lower_bound" if self.lower_bound else "peak"
 
     @property
     def record_id(self) -> str:
-        """``job:attempt:device:kind``; stores use it to apply each record at most once."""
-        kind = "lower_bound" if self.lower_bound else "peak"
-        return f"{self.job_id}:{self.attempt}:{self.device_id}:{kind}"
+        """``job:attempt:device:kind``; stores max-merge records with the same id (SPEC §7)."""
+        return f"{self.job_id}:{self.attempt}:{self.device_id}:{self.kind}"
 
 
 @dataclass(frozen=True, slots=True)

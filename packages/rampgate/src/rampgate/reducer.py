@@ -366,6 +366,7 @@ def _job_observed(state: State, ev: JobObserved, config: Config) -> State:
         grown = reserved.max(new_peak.scale(config.safety_margin))
         rt = replace(rt, reservation=frozen_map({**rt.reservation, dev: grown}))
         update = UpdateReservation(rt.id, rt.attempt, rt.reservation)
+        state = _record(state, _running_records(rt, [dev]))
         outbox = tuple(
             a
             for a in state.outbox
@@ -688,7 +689,21 @@ def _mark_stable(state: State, a: MarkStable) -> State:
         lost_count=0,
         applied=rt.applied | {(a.attempt, _STABLE)},
     )
+    state = _record(state, _running_records(rt, rt.job.devices))
     return _put(_clear(state, a), rt)
+
+
+def _running_records(rt: JobRuntime, devices: Iterable[DeviceId]) -> list[HistoryRecord]:
+    """Rule H: a STABLE job's observed peak, so siblings get an estimate before it finishes.
+
+    Written again with the same ``record_id`` when the reservation grows; stores
+    keep the per-dimension max of a record id.
+    """
+    return [
+        HistoryRecord(rt.id, d, rt.peak[d], True, rt.attempt, running=True)
+        for d in devices
+        if d in rt.last_obs_t and not rt.peak[d].is_zero
+    ]
 
 
 def _start_timeout(state: State, a: Requeue) -> State:

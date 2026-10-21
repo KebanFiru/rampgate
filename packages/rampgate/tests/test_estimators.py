@@ -98,3 +98,24 @@ def test_apply_history_feeds_success_and_oom_records() -> None:
     gpu = state.devices[GPU].device
     assert est.estimate(state.jobs["j"].job, gpu) == Resources(vram=40)
     apply_history(est, state, [HistoryRecord("ghost", GPU, Resources(vram=1), False, 1)])
+
+
+def test_rule_h_running_record_at_stable_and_rewritten_on_reservation_growth() -> None:
+    d = Driver().to(JobState.WARMING).observe(1.0, vram=40).stable()
+    running = HistoryRecord("j", GPU, Resources(vram=40), True, 1, running=True)
+    assert d.state.history_records == (running,)
+    assert running.record_id == f"j:1:{GPU}:running"
+    d.observe(2.0, vram=45)  # within the 1.15 margin: no UpdateReservation, no record
+    assert len(d.state.history_records) == 1
+    d.observe(3.0, vram=60)  # exceeds the reservation
+    grown = d.state.history_records[-1]
+    assert grown == HistoryRecord("j", GPU, Resources(vram=60), True, 1, running=True)
+    assert grown.record_id == running.record_id
+    store = InMemoryHistoryStore()
+    est = HistoryEstimator(store)
+    apply_history(est, d.state, reversed(d.state.history_records))  # any order
+    assert store.get("k", GPU) is None  # the job has no fingerprint
+    d2 = Driver().submit("j", fingerprint=("k",)).start().started()
+    d2.observe(1.0, vram=40).stable().observe(3.0, vram=60)
+    apply_history(est, d2.state, reversed(d2.state.history_records))
+    assert store.get("k", GPU) == Resources(vram=60)

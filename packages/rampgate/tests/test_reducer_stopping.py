@@ -63,7 +63,10 @@ def test_exit_with_requested_but_unsent_stop_follows_table(
 
 def test_success_while_stopping_records_history() -> None:
     d = stopping(P).exited(ExitKind.SUCCESS)
-    assert d.state.history_records == (HistoryRecord("j", GPU, Resources(vram=40), False, 1),)
+    assert d.state.history_records == (
+        HistoryRecord("j", GPU, Resources(vram=40), True, 1, running=True),
+        HistoryRecord("j", GPU, Resources(vram=40), False, 1),
+    )
 
 
 def test_oom_while_preempting_learns_but_does_not_fail() -> None:
@@ -73,7 +76,10 @@ def test_oom_while_preempting_learns_but_does_not_fail() -> None:
     assert rt.state is JobState.PREEMPTED
     assert rt.oom_count == 1
     assert rt.learned[GPU]["vram"] == pytest.approx(40 * 1.25)
-    assert d.state.history_records == (HistoryRecord("j", GPU, Resources(vram=40), True, 1),)
+    assert d.state.history_records == (
+        HistoryRecord("j", GPU, Resources(vram=40), True, 1, running=True),
+        HistoryRecord("j", GPU, Resources(vram=40), True, 1),
+    )
     assert d.state.outbox == ()
 
 
@@ -86,7 +92,10 @@ def test_oom_while_preempting_at_capacity_alone_does_not_fail() -> None:
 def test_oom_while_cancelling_records_peak_as_lower_bound() -> None:
     d = stopping(C).exited(ExitKind.OOM)
     assert d.rt().oom_count == 0
-    assert d.state.history_records == (HistoryRecord("j", GPU, Resources(vram=40), True, 1),)
+    assert d.state.history_records == (
+        HistoryRecord("j", GPU, Resources(vram=40), True, 1, running=True),
+        HistoryRecord("j", GPU, Resources(vram=40), True, 1),
+    )
 
 
 def test_failure_while_preempting_warns_unclean_stop() -> None:

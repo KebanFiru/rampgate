@@ -46,10 +46,13 @@ class Estimator(Protocol):
 
 
 class HistoryStore(Protocol):
-    """Durable peak history. ``put`` must be idempotent by ``(key, device_kind, record_id)``.
+    """Durable peak history. ``put`` max-merges by ``(key, device_kind, record_id)``.
 
-    The Engine hands a history record to the estimator before the next ``dump``;
-    after a crash in between, the restored engine hands it over again.
+    A record's stored value is the per-dimension max of every put with its id:
+    idempotent and order-independent. The Engine hands a history record to the
+    estimator before the next ``dump``; after a crash in between, the restored
+    engine hands it over again. A running record (Rule H) is also written again
+    with a larger peak when the job's reservation grows.
     """
 
     def get(self, key: str, device_kind: str) -> Resources | None: ...
@@ -72,12 +75,13 @@ def default_device_kind(device: Device) -> str:
 class InMemoryHistoryStore:
     """Keeps the component-wise max of everything put per (key, device kind).
 
-    Records with a ``record_id`` are applied at most once per (key, device kind).
+    Records with a ``record_id`` are max-merged per (key, device kind, record id);
+    ``puts_applied`` counts the puts that changed something.
     """
 
     def __init__(self) -> None:
         self._data: dict[tuple[str, str], Resources] = {}
-        self._applied: set[tuple[str, str, str]] = set()
+        self._applied: dict[tuple[str, str, str], Resources] = {}
         self.puts_applied = 0
 
     def get(self, key: str, device_kind: str) -> Resources | None:
@@ -93,18 +97,20 @@ class InMemoryHistoryStore:
         record_id: str | None = None,
     ) -> None:
         if record_id is not None:
-            if (key, device_kind, record_id) in self._applied:
+            seen = self._applied.get((key, device_kind, record_id))
+            merged = peak if seen is None else seen.max(peak)
+            if merged == seen:
                 return
-            self._applied.add((key, device_kind, record_id))
+            self._applied[(key, device_kind, record_id)] = merged
         old = self._data.get((key, device_kind))
         self._data[(key, device_kind)] = peak if old is None else old.max(peak)
         self.puts_applied += 1
 
     def to_json(self) -> dict[str, Any]:
-        """Peaks and applied record ids, sorted, for ``json.dumps``."""
+        """Peaks and applied records (id and merged value), sorted, for ``json.dumps``."""
         return {
             "peaks": [[k, kind, peak.to_json()] for (k, kind), peak in sorted(self._data.items())],
-            "applied": sorted([list(a) for a in self._applied]),
+            "applied": [[*a, peak.to_json()] for a, peak in sorted(self._applied.items())],
         }
 
     @classmethod
@@ -112,7 +118,10 @@ class InMemoryHistoryStore:
         store = cls()
         for key, kind, peak in data["peaks"]:
             store._data[(str(key), str(kind))] = Resources.from_json(peak)
-        store._applied = {(str(k), str(kind), str(r)) for k, kind, r in data["applied"]}
+        for k, kind, r, *peak in data["applied"]:
+            # Before max-merge (L3), only the ids were kept.
+            value = Resources.from_json(peak[0]) if peak else Resources()
+            store._applied[(str(k), str(kind), str(r))] = value
         return store
 
 
