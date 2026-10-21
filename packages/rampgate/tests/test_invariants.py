@@ -238,11 +238,12 @@ def check_exits(prev: State, tick: Tick) -> None:
                 prev_est = before.prev_estimate(d) or Resources()
                 new_est = after.learned[d]
                 cap = work.devices[d].capacity
-                room = _room_at_oom(state_before, before, d, event.t, CFG)
+                room, room_known = _room_at_oom(state_before, before, d, event.t, CFG)
                 assert prev_est.fits_in(new_est)
                 for dim in event.oom_dims or new_est.keys():
                     lower = max(before.peak.get(d, Resources())[dim], prev_est[dim], room[dim])
-                    if cap[dim] > 0 and room[dim] >= cap[dim] * (1 - CFG.foreign_tolerance):
+                    whole = room[dim] >= cap[dim] * (1 - CFG.foreign_tolerance)
+                    if cap[dim] > 0 and whole and room_known:
                         whole_device = True
                     assert new_est[dim] > prev_est[dim] or new_est[dim] >= cap[dim] or lower == 0, (
                         d,

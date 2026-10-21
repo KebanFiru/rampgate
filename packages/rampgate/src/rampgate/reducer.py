@@ -456,18 +456,25 @@ def _exit_while_stopping(
     raise AssertionError(ev.kind)  # pragma: no cover
 
 
-def _room_at_oom(state: State, rt: JobRuntime, d: DeviceId, t: float, config: Config) -> Resources:
+def _room_at_oom(
+    state: State, rt: JobRuntime, d: DeviceId, t: float, config: Config
+) -> tuple[Resources, bool]:
     """``C - F - sum(usage of the other active managed jobs)`` on ``d`` when ``rt`` died.
 
     ``F`` and each neighbour's usage are the max over the last ``foreign_window_s``,
-    so a spike between two samples still counts against the room.
+    so a spike between two samples still counts against the room. The flag says
+    whether the room is *known*: False if an active neighbour has no usage sample
+    in the window (e.g. it began in the same instant), whose usage then counts as 0.
     """
     window = config.foreign_window_s
     taken = state.devices[d].foreign_at(t, window)
+    known = True
     for other in state.jobs_on(d):
         if other.id != rt.id and other.state in ACTIVE_STATES:
             taken = taken + other.usage_at(d, t, window)
-    return state.devices[d].capacity.sub(taken, clamp=True)
+            samples = other.usage_samples.get(d, ())
+            known = known and any(s_t >= t - window for s_t, _ in samples)
+    return state.devices[d].capacity.sub(taken, clamp=True), known
 
 
 def _learn_from_oom(
@@ -485,8 +492,9 @@ def _learn_from_oom(
     Returns the new learned estimates, lower-bound history records, and whether
     the evidence says the job cannot fit the device: it OOMed in a dimension in
     which it had (almost) the whole device to itself at that moment,
-    ``room_at_oom >= capacity * (1 - foreign_tolerance)``. Where the estimate
-    came from does not matter for that decision.
+    ``room_at_oom >= capacity * (1 - foreign_tolerance)``, and the room is known
+    (no active neighbour without a recent usage sample). Where the estimate came
+    from does not matter for that decision.
     """
     learned: dict[DeviceId, Resources] = {}
     records: list[HistoryRecord] = []
@@ -498,7 +506,7 @@ def _learn_from_oom(
         if admitted is not None:
             prev = prev.max(admitted)
         base = rt.peak.get(d, Resources()).max(prev)
-        room = _room_at_oom(state, rt, d, ev.t, config)
+        room, room_known = _room_at_oom(state, rt, d, ev.t, config)
         full_lb = base.max(room)
         if d in rt.admitted_estimate and rt.admitted_estimate[d] is None:
             full_lb = full_lb.max(config.unknown_min_free_for(cap))
@@ -511,7 +519,8 @@ def _learn_from_oom(
             if cap[dim] > 0:
                 grown = min(grown, cap[dim])
             new[dim] = max(prev[dim], grown)
-            if cap[dim] > 0 and room[dim] >= cap[dim] * (1 - config.foreign_tolerance):
+            whole = room[dim] >= cap[dim] * (1 - config.foreign_tolerance)
+            if cap[dim] > 0 and whole and room_known:
                 exceeds_capacity = True
         learned[d] = Resources(new)
         if any(lower.values()):

@@ -176,3 +176,15 @@ def test_room_uses_the_max_over_the_window() -> None:
     d2.observe(85.0, "x", vram=60).observe(99.0, "x", vram=5)  # spike before the window
     d2.exited(ExitKind.OOM)
     assert d2.rt().learned[GPU] == Resources(vram=100.0)  # room 95 * 1.25, capped
+
+
+def test_no_capacity_fail_while_a_neighbours_usage_is_unknown() -> None:
+    # The neighbour began in the same instant and has no sample yet: the room is a guess.
+    d = Driver().submit().submit("x").start().start("x").started("x")
+    d.exited(ExitKind.OOM)
+    assert d.rt().state is JobState.PENDING
+    assert d.rt().learned[GPU] == Resources(vram=100)  # room counted as 100, capped
+    # Once the neighbour has reported (even 0), the room is known.
+    d2 = Driver().submit().submit("x").start().start("x").started("x").observe(95.0, "x")
+    d2.exited(ExitKind.OOM)
+    assert d2.rt().state is JobState.FAILED
