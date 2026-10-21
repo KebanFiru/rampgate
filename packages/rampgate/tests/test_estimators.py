@@ -91,7 +91,7 @@ def test_resolve_estimates_covers_unfinished_jobs() -> None:
 def test_apply_history_feeds_success_and_oom_records() -> None:
     est = HistoryEstimator(InMemoryHistoryStore())
     d = Driver().submit("j", fingerprint=("k",)).start(free={GPU: Resources(vram=40)})
-    d.exited(ExitKind.OOM)
+    d.room(vram=40).exited(ExitKind.OOM)
     state, _, history = drain(d.state)
     assert history == (HistoryRecord("j", GPU, Resources(vram=40), True, 1),)
     apply_history(est, state, history)

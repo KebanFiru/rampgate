@@ -200,6 +200,7 @@ def _fresh_attempt() -> dict[str, Any]:
         "starting_since": None,
         "warm_start": None,
         "usage": frozen_map(),
+        "usage_samples": frozen_map(),
         "peak": frozen_map(),
         "last_obs_t": frozen_map(),
         "last_peak_growth_t": None,
@@ -218,6 +219,7 @@ def _end_attempt(rt: JobRuntime, new_state: JobState, **changes: Any) -> JobRunt
         state=new_state,
         stop_intent=None,
         usage=frozen_map(),
+        usage_samples=frozen_map(),
         reservation=frozen_map(),
         **changes,
     )
@@ -343,9 +345,12 @@ def _job_observed(state: State, ev: JobObserved, config: Config) -> State:
     baseline, latest = _rebaseline(rt.steps_baseline, rt.steps_latest, ev.steps)
     epoch_baseline, epoch_latest = _rebaseline(rt.epoch_baseline, rt.epoch_latest, ev.epoch)
 
+    window_start = ev.t - config.foreign_window_s
+    kept = tuple(x for x in rt.usage_samples.get(dev, ()) if x[0] >= window_start)
     rt = replace(
         rt,
         usage=frozen_map({**rt.usage, dev: ev.usage}),
+        usage_samples=frozen_map({**rt.usage_samples, dev: (*kept, (ev.t, ev.usage))}),
         peak=frozen_map({**rt.peak, dev: new_peak}),
         last_obs_t=frozen_map({**rt.last_obs_t, dev: ev.t}),
         last_peak_growth_t=growth_t,
@@ -451,20 +456,36 @@ def _exit_while_stopping(
     raise AssertionError(ev.kind)  # pragma: no cover
 
 
+def _room_at_oom(state: State, rt: JobRuntime, d: DeviceId, t: float, config: Config) -> Resources:
+    """``C - F - sum(usage of the other active managed jobs)`` on ``d`` when ``rt`` died.
+
+    ``F`` and each neighbour's usage are the max over the last ``foreign_window_s``,
+    so a spike between two samples still counts against the room.
+    """
+    window = config.foreign_window_s
+    taken = state.devices[d].foreign_at(t, window)
+    for other in state.jobs_on(d):
+        if other.id != rt.id and other.state in ACTIVE_STATES:
+            taken = taken + other.usage_at(d, t, window)
+    return state.devices[d].capacity.sub(taken, clamp=True)
+
+
 def _learn_from_oom(
     state: State, rt: JobRuntime, ev: JobExited, config: Config
 ) -> tuple[Mapping[DeviceId, Resources], list[HistoryRecord], bool]:
     """Rule O, per placement device and affected dimension.
 
-    ``lower_bound = max(peak, previous estimate, admitted_free)``, plus
+    ``lower_bound = max(peak, previous estimate, room_at_oom)``, plus
     ``unknown_min_free`` on devices admitted without an estimate, and
     ``new_estimate = min(lower_bound * oom_growth, capacity)``, never below the
     previous estimate. Unaffected dimensions keep ``max(peak, previous estimate)``.
+    ``room_at_oom`` is what the device had left for the job when it died (see
+    `_room_at_oom`); ``admitted_free`` is diagnostic only.
 
     Returns the new learned estimates, lower-bound history records, and whether
     the evidence says the job cannot fit the device: it OOMed in a dimension in
-    which it was admitted with (almost) the whole device free,
-    ``admitted_free >= capacity * (1 - foreign_tolerance)``. Where the estimate
+    which it had (almost) the whole device to itself at that moment,
+    ``room_at_oom >= capacity * (1 - foreign_tolerance)``. Where the estimate
     came from does not matter for that decision.
     """
     learned: dict[DeviceId, Resources] = {}
@@ -477,7 +498,8 @@ def _learn_from_oom(
         if admitted is not None:
             prev = prev.max(admitted)
         base = rt.peak.get(d, Resources()).max(prev)
-        full_lb = base.max(rt.admitted_free.get(d, Resources()))
+        room = _room_at_oom(state, rt, d, ev.t, config)
+        full_lb = base.max(room)
         if d in rt.admitted_estimate and rt.admitted_estimate[d] is None:
             full_lb = full_lb.max(config.unknown_min_free_for(cap))
         dims = ev.oom_dims if ev.oom_dims is not None else sorted(full_lb.keys() | cap.keys())
@@ -489,10 +511,7 @@ def _learn_from_oom(
             if cap[dim] > 0:
                 grown = min(grown, cap[dim])
             new[dim] = max(prev[dim], grown)
-            had_whole_device = rt.admitted_free.get(d, Resources())[dim] >= cap[dim] * (
-                1 - config.foreign_tolerance
-            )
-            if cap[dim] > 0 and had_whole_device:
+            if cap[dim] > 0 and room[dim] >= cap[dim] * (1 - config.foreign_tolerance):
                 exceeds_capacity = True
         learned[d] = Resources(new)
         if any(lower.values()):

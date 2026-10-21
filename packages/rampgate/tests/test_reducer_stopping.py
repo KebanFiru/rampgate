@@ -68,7 +68,7 @@ def test_success_while_stopping_records_history() -> None:
 
 def test_oom_while_preempting_learns_but_does_not_fail() -> None:
     cfg = Config(max_oom_retries=0)
-    d = stopping(P, cfg).exited(ExitKind.OOM)
+    d = stopping(P, cfg).room(vram=40).exited(ExitKind.OOM)
     rt = d.rt()
     assert rt.state is JobState.PREEMPTED
     assert rt.oom_count == 1

@@ -21,6 +21,8 @@ from rampgate import (
     DeviceAdded,
     DeviceRemoved,
     Event,
+    Fail,
+    FailReason,
     FailurePolicy,
     FifoPolicy,
     InvalidTransition,
@@ -53,6 +55,7 @@ from rampgate import (
     warning_key,
 )
 from rampgate import DeviceObserved as DeviceObs
+from rampgate.reducer import _room_at_oom
 from rampgate.sim import (
     Command,
     EpochEval,
@@ -216,6 +219,7 @@ def check_exits(prev: State, tick: Tick) -> None:
     work = prev
     for event in tick.events:
         before = work.jobs.get(getattr(event, "job_id", ""))
+        state_before = work
         try:
             work = reduce(work, event, CFG)
         except InvalidTransition:
@@ -229,23 +233,25 @@ def check_exits(prev: State, tick: Tick) -> None:
         elif event.kind.value == "OOM":  # I7
             assert after.oom_count == before.oom_count + 1
             assert after.oom_count <= CFG.max_oom_retries + 1
+            whole_device = False
             for d in before.job.devices:
                 prev_est = before.prev_estimate(d) or Resources()
                 new_est = after.learned[d]
                 cap = work.devices[d].capacity
+                room = _room_at_oom(state_before, before, d, event.t, CFG)
                 assert prev_est.fits_in(new_est)
                 for dim in event.oom_dims or new_est.keys():
-                    lower = max(
-                        before.peak.get(d, Resources())[dim],
-                        prev_est[dim],
-                        before.admitted_free.get(d, Resources())[dim],
-                    )
+                    lower = max(before.peak.get(d, Resources())[dim], prev_est[dim], room[dim])
+                    if cap[dim] > 0 and room[dim] >= cap[dim] * (1 - CFG.foreign_tolerance):
+                        whole_device = True
                     assert new_est[dim] > prev_est[dim] or new_est[dim] >= cap[dim] or lower == 0, (
                         d,
                         dim,
                         prev_est,
                         new_est,
                     )
+            capacity_fail = Fail(before.id, before.attempt, FailReason.EXCEEDS_DEVICE_CAPACITY)
+            assert (capacity_fail in work.outbox) == whole_device
 
 
 def check_explained(tick: Tick) -> None:

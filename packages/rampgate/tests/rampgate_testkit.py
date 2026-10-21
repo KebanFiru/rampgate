@@ -11,6 +11,7 @@ from rampgate import (
     Config,
     Decision,
     Device,
+    DeviceObserved,
     ExitKind,
     FifoPolicy,
     IgnoreReason,
@@ -100,6 +101,18 @@ class Driver:
                 job_id, device, t, Resources(usage), steps=steps, epoch=epoch, attempt=attempt
             )
         )
+
+    def foreign(self, t: float = 99.0, device: str = GPU, **usage: float) -> Driver:
+        """A ``DeviceObserved`` whose total is the managed usage plus ``usage`` as foreign load."""
+        managed = Resources()
+        for rt in self.state.jobs_on(device):
+            managed = managed + rt.usage.get(device, Resources())
+        return self(DeviceObserved(device, t, managed + Resources(usage)))
+
+    def room(self, t: float = 99.0, device: str = GPU, **room: float) -> Driver:
+        """Leave exactly ``room`` of the device to its jobs, via foreign load observed at ``t``."""
+        cap = self.state.devices[device].capacity
+        return self.foreign(t, device, **{k: cap[k] - v for k, v in room.items()})
 
     def exited(
         self,

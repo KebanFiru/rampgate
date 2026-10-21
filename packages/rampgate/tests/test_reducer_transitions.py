@@ -200,7 +200,7 @@ def test_exit_failure(state: JobState) -> None:
 
 @pytest.mark.parametrize("state", RUNNING)
 def test_exit_oom_requeues(state: JobState) -> None:
-    d = Driver().to(state).exited(ExitKind.OOM)
+    d = Driver().to(state).room(vram=50).exited(ExitKind.OOM)
     rt = d.rt()
     assert rt.state is JobState.PENDING
     assert rt.attempt == 2
@@ -446,7 +446,7 @@ def test_update_without_changes_is_noop() -> None:
 
 
 def test_update_drops_learned_estimates_for_removed_devices() -> None:
-    d = Driver(gpus(GPU, GPU1)).to(JobState.WARMING).exited(ExitKind.OOM)
+    d = Driver(gpus(GPU, GPU1)).to(JobState.WARMING).room(vram=50).exited(ExitKind.OOM)
     assert GPU in d.rt().learned
     d(JobUpdated("j", placement={GPU1: None}))
     assert d.rt().learned == {}

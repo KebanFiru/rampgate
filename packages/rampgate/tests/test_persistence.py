@@ -46,6 +46,7 @@ from rampgate import (
     dump_state,
     load_state,
 )
+from rampgate.model import frozen_map
 from rampgate.serialization import MIGRATIONS, SCHEMA_VERSION, from_data, to_data
 from rampgate.sim import RampPlateau, Scenario, SimJob, simulate
 from rampgate_testkit import GPU, GPU1, Driver, examples, gpus
@@ -98,6 +99,28 @@ def test_schema_errors() -> None:
         load_state({**good, "schema_version": "1"})
     with pytest.raises(UnsupportedSchema, match="State"):
         load_state({**good, "state": to_data(Resources(vram=1))})
+
+
+def test_v1_dump_loads_with_empty_usage_samples() -> None:
+    d = Driver().submit().start().started().observe(1.0, vram=10)
+    v1 = to_data(d.state)
+
+    def strip(node: object) -> object:
+        if isinstance(node, dict):
+            out = {k: strip(v) for k, v in node.items()}
+            if out.get("$t") == "JobRuntime":
+                del out["f"]["usage_samples"]  # type: ignore[attr-defined]
+            return out
+        if isinstance(node, list):
+            return [strip(v) for v in node]
+        return node
+
+    data = {"format": "rampgate.state", "schema_version": 1, "state": strip(v1)}
+    before = json.dumps(data, sort_keys=True)
+    loaded = load_state(data)
+    assert json.dumps(data, sort_keys=True) == before  # the caller's dump is not mutated
+    expected = replace(d.rt(), usage_samples=frozen_map())
+    assert loaded == replace(d.state, jobs=frozen_map({"j": expected}))
 
 
 def test_migration_path(monkeypatch: pytest.MonkeyPatch) -> None:

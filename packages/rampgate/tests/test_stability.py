@@ -96,7 +96,7 @@ def test_cumulative_and_reset_counters_stabilize_at_same_time() -> None:
 
 def test_steps_reset_by_start() -> None:
     d = warming().observe(1.0, vram=10, steps=5).observe(2.0, vram=10, steps=9)
-    d.exited(ExitKind.OOM).start()
+    d.room(vram=50).exited(ExitKind.OOM).start()
     assert d.rt().steps_in_attempt == 0
     assert d.rt().peak == {}
 

@@ -316,3 +316,46 @@ def test_unknown_job_waits_for_real_free_capacity_on_a_full_gpu() -> None:
     assert start >= known_exit
     old_rule = simulate(scenario, FifoPolicy(), config=Config(unknown_min_free=Resources()))
     assert old_rule.final.jobs["known"].oom_count + old_rule.final.jobs["unknown"].oom_count > 0
+
+
+# -- Rule O: room at OOM (regressions for the admitted_free rule) ---------------------------
+
+SPIKE_CFG = Config(
+    min_warmup_s=5, stable_window_s=10, stable_min_steps=5, stable_requires_epoch=False
+)
+
+
+def _steps(*steps: tuple[float, float], duration: float = 600.0) -> StepProfile:
+    return StepProfile(steps=tuple((t, Resources(vram=v)) for t, v in steps), duration_s=duration)
+
+
+def test_stable_spike_next_to_a_neighbour_retries_instead_of_failing() -> None:
+    a = SimJob(Job("a", {GPU.id: None}), _steps((0, 40), (300, 70)))
+    b = SimJob(Job("b", {GPU.id: None}), _steps((0, 40)), submit_at=1)
+    trace = simulate(Scenario((GPU,), (a, b)), FifoPolicy(), config=SPIKE_CFG)
+    final = trace.final.jobs
+    assert final["a"].state is JobState.SUCCEEDED
+    assert final["a"].oom_count == 1
+    # The spike is killed before it is observed: lower bound = max(peak 40, room 60).
+    assert final["a"].learned[GPU.id] == Resources(vram=75.0)
+    # 75 + 40 > 100: after the OOM, a waits for b instead of running next to it.
+    restart = next(
+        t.now
+        for t in trace.ticks
+        for x in t.decision.actions
+        if isinstance(x, Start) and x.job_id == "a" and x.attempt == 2
+    )
+    b_exit = next(
+        t.now for t in trace.ticks for e in t.events if isinstance(e, JobExited) and e.job_id == "b"
+    )
+    assert restart >= b_exit
+
+
+def test_oom_while_alone_fails_even_if_the_device_was_shared_at_start() -> None:
+    a = SimJob(Job("a", {GPU.id: None}), _steps((0, 40), (300, 120)))
+    b = SimJob(Job("b", {GPU.id: None}), _steps((0, 40), duration=100), submit_at=1)
+    trace = simulate(Scenario((GPU,), (a, b)), FifoPolicy(), config=SPIKE_CFG)
+    final = trace.final.jobs
+    assert final["b"].state is JobState.SUCCEEDED
+    assert final["a"].state is JobState.FAILED
+    assert final["a"].oom_count == 1

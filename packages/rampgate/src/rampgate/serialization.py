@@ -28,10 +28,23 @@ __all__ = [
 ]
 
 STATE_FORMAT = "rampgate.state"
-SCHEMA_VERSION = 1
+SCHEMA_VERSION = 2
+
+
+def _v1_to_v2(payload: Any) -> Any:
+    """v2 adds ``JobRuntime.usage_samples`` (Rule O's room at OOM); v1 dumps start empty."""
+    if isinstance(payload, dict):
+        out = {k: _v1_to_v2(v) for k, v in payload.items()}
+        if out.get("$t") == "JobRuntime":
+            out["f"].setdefault("usage_samples", {"$m": []})
+        return out
+    if isinstance(payload, list):
+        return [_v1_to_v2(v) for v in payload]
+    return payload
+
 
 # MIGRATIONS[v] upgrades a version-v ``state`` payload to version v + 1.
-MIGRATIONS: dict[int, Callable[[Any], Any]] = {}
+MIGRATIONS: dict[int, Callable[[Any], Any]] = {1: _v1_to_v2}
 
 
 class UnsupportedSchema(ValueError):

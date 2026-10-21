@@ -243,7 +243,7 @@ def test_priority_aging_with_blocking() -> None:
 
 
 def test_outbox_is_emitted_and_drained() -> None:
-    d = Driver().to(JobState.WARMING).exited(ExitKind.OOM)
+    d = Driver().to(JobState.WARMING).room(vram=50).exited(ExitKind.OOM)
     dec = decide_on(d, 1.0)
     assert isinstance(dec.actions[0], Requeue)
     apply(d, dec)

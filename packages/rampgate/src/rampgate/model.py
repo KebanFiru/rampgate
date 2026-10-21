@@ -177,6 +177,9 @@ class JobRuntime:
     starting_since: float | None = None
     warm_start: float | None = None
     usage: Mapping[DeviceId, Resources] = field(default_factory=frozen_map)
+    usage_samples: Mapping[DeviceId, tuple[tuple[float, Resources], ...]] = field(
+        default_factory=frozen_map
+    )
     peak: Mapping[DeviceId, Resources] = field(default_factory=frozen_map)
     last_obs_t: Mapping[DeviceId, float] = field(default_factory=frozen_map)
     last_peak_growth_t: float | None = None
@@ -201,6 +204,14 @@ class JobRuntime:
         if self.epoch_latest is None or self.epoch_baseline is None:
             return None
         return self.epoch_latest - self.epoch_baseline
+
+    def usage_at(self, device_id: DeviceId, now: float, window_s: float) -> Resources:
+        """Max usage on a device over this attempt's samples with ``t >= now - window_s``."""
+        out = Resources()
+        for t, sample in self.usage_samples.get(device_id, ()):
+            if t >= now - window_s:
+                out = out.max(sample)
+        return out
 
     def prev_estimate(self, device_id: DeviceId) -> Resources | None:
         """``max(declared hint, learned)`` on a device, or None if both are unknown."""

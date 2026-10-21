@@ -25,6 +25,7 @@
 - `Engine.confirm`, `Config.reconcile_grace_s` and the edge-triggered `Warn(Unreconciled)`; `HistoryRecord.record_id` and idempotent `HistoryStore.put`; `simulate(restart_at=[...], downtime=[...])` (L3 follow-up).
 
 ### Changed
+- Rule O uses the room the device had left at OOM time (`C − F − Σ neighbours' usage`, max over `foreign_window_s`) instead of `admitted_free`, both for the lower bound and for `Fail(EXCEEDS_DEVICE_CAPACITY)`. A STABLE job that spikes next to a later neighbour now retries with growth instead of failing. `JobRuntime.usage_samples` keeps the window; state schema v2, with a migration from v1 (L4).
 - `Fail(EXCEEDS_DEVICE_CAPACITY)` is decided from evidence only: the job OOMed while it had effectively the whole device free (L3 follow-up).
 - Only observations naming the current attempt reconcile a job after a load (L3 follow-up).
 - Unknown-estimate jobs use Rule A's direct comparison against `unknown_min_free` and are refused on overcommitted devices (L2 follow-up).

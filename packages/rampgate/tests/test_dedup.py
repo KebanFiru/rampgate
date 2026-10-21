@@ -30,7 +30,7 @@ def test_duplicate_started_and_exited() -> None:
 
 
 def test_stale_attempt_events_are_ignored() -> None:
-    d = Driver().to(JobState.WARMING).exited(ExitKind.OOM)
+    d = Driver().to(JobState.WARMING).room(vram=50).exited(ExitKind.OOM)
     before = d.state.jobs
     d(JobStarted("j", 1, 0.0), JobExited("j", 1, ExitKind.FAILURE, 9.0))
     d(JobObserved("j", GPU, 50.0, Resources(vram=1), attempt=1))
@@ -61,7 +61,7 @@ def test_out_of_order_observation_never_moves_growth_time_back() -> None:
 
 
 def test_observation_without_attempt_after_exit_is_stale() -> None:
-    d = Driver().to(JobState.WARMING).exited(ExitKind.OOM, t=30.0)
+    d = Driver().to(JobState.WARMING).room(29.0, vram=50).exited(ExitKind.OOM, t=30.0)
     d.observe(25.0, vram=7)
     assert d.ignored == [S]
     d.start().started(t=40.0).observe(29.0, vram=7)
@@ -120,7 +120,7 @@ def test_replaying_keyed_events_only_grows_the_ignored_log() -> None:
     events: list[Event] = [
         JobStarted("j", 1, 0.0),
         JobObserved("j", GPU, 1.0, Resources(vram=10), steps=1),
-        DeviceObserved(GPU, 1.0, Resources(vram=12)),
+        DeviceObserved(GPU, 1.0, Resources(vram=60)),
         JobObserved("j", GPU, 2.0, Resources(vram=20), steps=5),
         JobExited("j", 1, ExitKind.OOM, 3.0),
         JobStarted("j", 2, 4.0),
