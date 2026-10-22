@@ -132,15 +132,24 @@ def _is_warming_like(rt: JobRuntime) -> bool:
 
 
 def _warming_load(rt: JobRuntime, d: DeviceId, config: Config) -> Resources:
-    """``W_j,d`` (SPEC §5): ``max(E * trusted_margin, usage)`` for a trusted estimate, otherwise
-    ``max(E, usage)`` with the estimate used at admission (0 if it was unknown)."""
+    """``W_j,d`` (SPEC §5): ``max(E * margin, usage)`` for a trusted estimate (`trusted_margin`
+    with enough observations, rule A, else `safety_margin`), otherwise ``max(E, usage)`` with
+    the estimate used at admission (0 if it was unknown)."""
     usage = rt.usage.get(d, Resources())
     estimate = rt.admitted_estimate.get(d)
     if estimate is None:
         return usage
     if d in rt.trusted:
-        return usage.max(estimate.scale(config.trusted_margin))
+        observed = rt.admitted_observations.get(d, 0)
+        return usage.max(estimate.scale(_trusted_margin(observed, config)))
     return usage.max(estimate)
+
+
+def _trusted_margin(observations: int, config: Config) -> float:
+    """Rule A (SPEC §5): ``trusted_margin`` needs ``min_trusted_observations`` observations."""
+    if observations >= config.min_trusted_observations:
+        return config.trusted_margin
+    return config.safety_margin
 
 
 def device_loads(state: State, now: float, config: Config) -> dict[DeviceId, DeviceLoad]:
@@ -394,12 +403,14 @@ def _admit(tick: _Tick, policy: OrderingPolicy, admission: Admission) -> None:
                 tick.now,
                 estimates,
                 trusted,
+                {d: tick.snapshot.observations.get((rt.id, d), 0) for d in sorted(trusted)},
             )
             tick.emit(start)
             for d in devices:
                 e = estimates[d] or Resources()
                 if d in trusted:
-                    extra = loads[d].warming_usage + e.scale(tick.config.trusted_margin)
+                    margin = _trusted_margin(start.observations[d], tick.config)
+                    extra = loads[d].warming_usage + e.scale(margin)
                     loads[d] = replace(loads[d], warming_usage=extra)
                     continue
                 warming[d] = rt.id

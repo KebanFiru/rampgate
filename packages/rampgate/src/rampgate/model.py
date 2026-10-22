@@ -185,6 +185,7 @@ class JobRuntime:
     admitted_free: Mapping[DeviceId, Resources] = field(default_factory=frozen_map)
     admitted_estimate: Mapping[DeviceId, Resources | None] = field(default_factory=frozen_map)
     trusted: frozenset[DeviceId] = frozenset()
+    admitted_observations: Mapping[DeviceId, int] = field(default_factory=frozen_map)
     stable_at: float | None = None
     starting_since: float | None = None
     warm_start: float | None = None
@@ -308,6 +309,8 @@ class Snapshot:
         default_factory=frozen_map
     )
     trusted: frozenset[tuple[JobId, DeviceId]] = frozenset()
+    # Complete observations behind a trusted estimate (rule A, SPEC §5); missing = 0.
+    observations: Mapping[tuple[JobId, DeviceId], int] = field(default_factory=frozen_map)
 
     def is_trusted(self, rt: JobRuntime, device_id: DeviceId) -> bool:
         """SPEC §5: the estimator answered from the most specific fingerprint level and the

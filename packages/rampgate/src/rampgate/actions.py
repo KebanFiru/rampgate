@@ -102,6 +102,8 @@ class Start(_ActionMixin):
     issued_at: float
     estimate: Mapping[DeviceId, Resources | None] = field(default_factory=frozen_map)
     trusted: frozenset[DeviceId] = frozenset()
+    # Per trusted device: complete observations behind the estimate (rule A, SPEC §5).
+    observations: Mapping[DeviceId, int] = field(default_factory=frozen_map)
 
 
 @dataclass(frozen=True, slots=True)

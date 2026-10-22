@@ -227,7 +227,9 @@ def test_engine_tick_hands_history_to_the_estimator_and_reports_ignored_events()
     e.on_exited("a", 1, ExitKind.SUCCESS, 3.0)
     decision = e.tick(4.0)
     assert len(decision.ignored_events) == 1
-    assert est.estimate(job, e.state.devices[GPU].device) == EstimateResult(Resources(vram=40))
+    assert est.estimate(job, e.state.devices[GPU].device) == EstimateResult(
+        Resources(vram=40), observations=1
+    )
     assert e.tick(5.0).ignored_events == ()
 
 

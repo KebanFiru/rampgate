@@ -146,7 +146,7 @@ def test_config_defaults_match_spec() -> None:
     assert (c.growth_tol, c.max_warmup_s, c.oom_growth, c.max_oom_retries) == (0.02, 600, 1.25, 2)
     assert (c.max_lost_retries, c.preempt_grace_s, c.foreign_window_s) == (3, 120, 10)
     assert (c.foreign_tolerance, c.start_timeout_s, c.unknown_min_free) == (0.02, 300, 0.10)
-    assert c.trusted_margin == 1.05
+    assert (c.trusted_margin, c.min_trusted_observations) == (1.05, 3)
 
 
 @pytest.mark.parametrize(

@@ -47,6 +47,8 @@ class EstimateResult:
     value: Resources
     level: int = 0
     complete: bool = True
+    # Complete observations behind the value (rule A, SPEC §5); 0 = unknown, the safe side.
+    observations: int = 0
 
     @property
     def trusted(self) -> bool:
@@ -82,6 +84,7 @@ class HistoryEntry:
 
     complete: Resources | None
     lower_bound: Resources | None
+    observation_count: int = 0
 
     @property
     def value(self) -> Resources:
@@ -157,7 +160,10 @@ class InMemoryHistoryStore:
         complete = [r for r in records.values() if not r.lower_bound]
         newest = max((r.seq for r in complete), default=-1)
         lower = [r for r in records.values() if r.lower_bound and r.seq > newest]
-        return HistoryEntry(_max(r.value for r in complete), _max(r.value for r in lower))
+        observations = {_observation(rid) for rid, r in records.items() if not r.lower_bound}
+        return HistoryEntry(
+            _max(r.value for r in complete), _max(r.value for r in lower), len(observations)
+        )
 
     def put(
         self,
@@ -218,6 +224,13 @@ class InMemoryHistoryStore:
         return store
 
 
+def _observation(record_id: str) -> str:
+    """``job:attempt:device:kind`` -> ``job:attempt:device``: a job's running and later peak
+    records are one observation (rule A). Ids without a known kind count as themselves."""
+    head, _, kind = record_id.rpartition(":")
+    return head if kind in ("peak", "running", "lower_bound") and head else record_id
+
+
 def _max(values: Iterable[Resources]) -> Resources | None:
     out: Resources | None = None
     for v in values:
@@ -256,7 +269,9 @@ class HistoryEstimator:
             complete = entry.complete is not None and (
                 entry.lower_bound is None or not entry.lower_bound.exceeds(entry.complete)
             )
-            return EstimateResult(entry.value, level, complete=complete)
+            return EstimateResult(
+                entry.value, level, complete=complete, observations=entry.observation_count
+            )
         return None
 
     def record(
@@ -292,17 +307,24 @@ class NullEstimator:
 
 
 class StaticEstimator:
-    """Fixed estimates by job id and device id (for tests), all at fingerprint ``level``."""
+    """Fixed estimates by job id and device id (for tests), all at fingerprint ``level``
+    and backed by ``observations`` complete observations."""
 
     def __init__(
-        self, mapping: Mapping[JobId, Mapping[DeviceId, Resources]], level: int = 0
+        self,
+        mapping: Mapping[JobId, Mapping[DeviceId, Resources]],
+        level: int = 0,
+        observations: int = 0,
     ) -> None:
         self.mapping = {j: dict(m) for j, m in mapping.items()}
         self.level = level
+        self.observations = observations
 
     def estimate(self, job: Job, device: Device) -> EstimateResult | None:
         value = self.mapping.get(job.id, {}).get(device.id)
-        return None if value is None else EstimateResult(value, self.level)
+        if value is None:
+            return None
+        return EstimateResult(value, self.level, observations=self.observations)
 
     def record(
         self,
@@ -320,6 +342,7 @@ def resolve_estimates(state: State, estimator: Estimator) -> Snapshot:
     """Ask the estimator about every unfinished job, so ``decide`` can stay pure."""
     estimates: dict[JobId, Mapping[DeviceId, Resources | None]] = {}
     trusted: set[tuple[JobId, DeviceId]] = set()
+    observations: dict[tuple[JobId, DeviceId], int] = {}
     for rt in sorted(state.jobs.values(), key=lambda rt: rt.submit_seq):
         if rt.state in TERMINAL_STATES:
             continue
@@ -330,10 +353,11 @@ def resolve_estimates(state: State, estimator: Estimator) -> Snapshot:
                 per_device[d] = result.value
                 if result.trusted:
                     trusted.add((rt.id, d))
+                    observations[(rt.id, d)] = result.observations
             else:
                 per_device[d] = result
         estimates[rt.id] = frozen_map(per_device)
-    return Snapshot(state, frozen_map(estimates), frozenset(trusted))
+    return Snapshot(state, frozen_map(estimates), frozenset(trusted), frozen_map(observations))
 
 
 def apply_history(estimator: Estimator, state: State, records: Iterable[HistoryRecord]) -> None:

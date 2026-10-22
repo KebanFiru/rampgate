@@ -3,6 +3,7 @@
 ## Unreleased
 
 ### Added
+- Rule A: `Config.min_trusted_observations` (default 3). `trusted_margin` applies only when the level-0 key holds that many complete observations (`HistoryEntry.observation_count`, `EstimateResult.observations`, `Snapshot.observations`, `Start.observations`); with fewer, a trusted job counts with `safety_margin`. State schema v3 (migration from v2: no observations, i.e. `safety_margin`) (SPEC §5).
 - `Config.trusted_margin` (default 1.05): a trusted STARTING/WARMING job counts as `max(E × trusted_margin, usage)`; `safety_margin` (1.15) stays for reservations from one observation (SPEC §5; changed after the first benchmark results).
 - `Report.ooms_per_job`, `max_job_ooms`, `repeat_device_ooms`; `TimelineEntry.device` names the device of an OOM kill.
 - `Report.first_contact_unknown` / `first_contact_hint`: first-contact means no observation-based estimate (no history record at any level, first attempt); a job admitted on its declared hint alone counts (SPEC §12 L4 clarification).

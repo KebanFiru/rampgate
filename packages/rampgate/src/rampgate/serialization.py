@@ -28,7 +28,7 @@ __all__ = [
 ]
 
 STATE_FORMAT = "rampgate.state"
-SCHEMA_VERSION = 2
+SCHEMA_VERSION = 3
 
 
 def _v1_to_v2(payload: Any) -> Any:
@@ -43,8 +43,23 @@ def _v1_to_v2(payload: Any) -> Any:
     return payload
 
 
+def _v2_to_v3(payload: Any) -> Any:
+    """v3 adds the observation counts of rule A: ``JobRuntime.admitted_observations`` and
+    ``Start.observations``; v2 dumps start empty (0 observations: ``safety_margin``)."""
+    if isinstance(payload, dict):
+        out = {k: _v2_to_v3(v) for k, v in payload.items()}
+        if out.get("$t") == "JobRuntime":
+            out["f"].setdefault("admitted_observations", {"$m": []})
+        if out.get("$t") == "Start":
+            out["f"].setdefault("observations", {"$m": []})
+        return out
+    if isinstance(payload, list):
+        return [_v2_to_v3(v) for v in payload]
+    return payload
+
+
 # MIGRATIONS[v] upgrades a version-v ``state`` payload to version v + 1.
-MIGRATIONS: dict[int, Callable[[Any], Any]] = {1: _v1_to_v2}
+MIGRATIONS: dict[int, Callable[[Any], Any]] = {1: _v1_to_v2, 2: _v2_to_v3}
 
 
 class UnsupportedSchema(ValueError):

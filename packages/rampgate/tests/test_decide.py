@@ -495,8 +495,13 @@ def test_duck_typed_policy_defaults_to_no_blocking_and_no_queue_stops() -> None:
 # -- trusted estimates and Rule P modes (SPEC §5) --------------------------------------------
 
 
-def trusted_snapshot(d: Driver, job: str, vram: float) -> Snapshot:
-    return Snapshot(d.state, {job: {GPU: Resources(vram=vram)}}, frozenset({(job, GPU)}))
+def trusted_snapshot(d: Driver, job: str, vram: float, observations: int = 3) -> Snapshot:
+    return Snapshot(
+        d.state,
+        {job: {GPU: Resources(vram=vram)}},
+        frozenset({(job, GPU)}),
+        {(job, GPU): observations},
+    )
 
 
 def test_trusted_job_skips_probation_and_counts_estimate_times_trusted_margin() -> None:
@@ -521,11 +526,30 @@ def test_trusted_margin_is_separate_from_safety_margin() -> None:
         d.state,
         {"b": {GPU: Resources(vram=60)}, "c": {GPU: Resources(vram=35)}},
         frozenset({("b", GPU), ("c", GPU)}),
+        {("b", GPU): 3, ("c", GPU): 3},
     )
     assert starts(decide(snapshot, 0.0, d.config, FifoPolicy(strict=False))) == ["b", "c"]
     strict = Driver(config=Config(trusted_margin=1.15)).submit("b").submit("c")
-    snapshot = Snapshot(strict.state, snapshot.estimates, snapshot.trusted)
+    snapshot = Snapshot(strict.state, snapshot.estimates, snapshot.trusted, snapshot.observations)
     assert starts(decide(snapshot, 0.0, strict.config, FifoPolicy(strict=False))) == ["b"]
+
+
+def test_rule_a_few_observations_count_with_safety_margin() -> None:
+    # One observation behind b's estimate: b stays trusted (no probation slot) but counts
+    # with safety_margin, 60 * 1.15 = 69, and c (35) no longer fits next to it.
+    d = Driver().submit("b").submit("c")
+    estimates = {"b": {GPU: Resources(vram=60)}, "c": {GPU: Resources(vram=35)}}
+    trusted = frozenset({("b", GPU), ("c", GPU)})
+    few = Snapshot(d.state, estimates, trusted, {("b", GPU): 1, ("c", GPU): 1})
+    dec = decide(few, 0.0, d.config, FifoPolicy(strict=False))
+    assert starts(dec) == ["b"]
+    (start,) = of_type(dec, Start)
+    assert start.observations == {GPU: 1}  # type: ignore[attr-defined]
+    apply(d, dec)
+    assert device_loads(d.state, 0.0, d.config)[GPU].warming_usage == Resources(vram=69)
+    assert device_loads(d.state, 0.0, d.config)[GPU].warming_job is None
+    enough = Snapshot(d.state, estimates, trusted, {("c", GPU): 3})
+    assert starts(decide(enough, 0.0, d.config, FifoPolicy(strict=False))) == []
 
 
 def test_untrusted_job_waits_next_to_a_trusted_warming_job_only_for_capacity() -> None:

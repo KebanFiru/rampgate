@@ -72,3 +72,16 @@ def test_check_gates_every_rampgate_row_but_not_ablations(bench: Any) -> None:
         "d_under_declared Probation seed 0: 1 OOM(s) not first-contact",
         "e_trainq Probation (warm) seed 0: 1 job(s) OOMed twice on a device",
     ]
+
+
+def test_rule_a_regression_d_under_seed_5(bench: Any) -> None:
+    """Development seeds, d-under seed 5: two tmpl:l1 jobs trusted on ONE running record
+    (38.6 GiB) started side by side under trusted_margin 1.05; one peaked at 41.7 and an
+    OOM followed that was not first-contact. Rule A (SPEC §5) counts them with
+    safety_margin until 3 observations exist."""
+    from rampgate.sim import STRATEGIES  # noqa: PLC0415
+
+    task = bench.Task("main", "d_under_declared", STRATEGIES["Probation"].name, 5, 15.0, None)
+    row = bench.execute(task)
+    assert row["oom_count"] == row["first_contact_ooms"]
+    assert row["repeat_device_ooms"] == 0

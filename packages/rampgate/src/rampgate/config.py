@@ -19,6 +19,8 @@ class Config:
     safety_margin: float = 1.15
     # A trusted STARTING/WARMING job: its estimate is already a max of observations.
     trusted_margin: float = 1.05
+    # ...but only with this many complete observations of its level-0 key (rule A).
+    min_trusted_observations: int = 3
     min_warmup_s: float = 30
     stable_window_s: float = 60
     stable_min_steps: int = 20
@@ -55,7 +57,12 @@ class Config:
                 raise TypeError(f"{f.name} must be a number, got {type(value).__name__}")
             if not math.isfinite(value) or value < 0:
                 raise ValueError(f"{f.name} must be finite and non-negative, got {value!r}")
-        for name in ("stable_min_steps", "max_oom_retries", "max_lost_retries"):
+        for name in (
+            "stable_min_steps",
+            "max_oom_retries",
+            "max_lost_retries",
+            "min_trusted_observations",
+        ):
             if not isinstance(getattr(self, name), int):
                 raise TypeError(f"{name} must be an int")
         if self.safety_margin < 1:

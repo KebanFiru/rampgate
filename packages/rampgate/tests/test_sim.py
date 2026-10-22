@@ -181,7 +181,7 @@ def test_history_makes_the_second_run_reserve_up_front() -> None:
     est = HistoryEstimator(InMemoryHistoryStore())
     first = (SimJob(Job("a", {GPU.id: None}, fingerprint=("m",)), ramp(70, duration=50)),)
     simulate(Scenario((GPU,), first), FifoPolicy(), estimator=est)
-    assert est.estimate(first[0].job, GPU) == EstimateResult(Resources(vram=70))
+    assert est.estimate(first[0].job, GPU) == EstimateResult(Resources(vram=70), observations=1)
     big = SimJob(Job("b", {GPU.id: None}, fingerprint=("m",)), ramp(70, duration=50))
     trace = simulate(Scenario((GPU,), (big,)), FifoPolicy(), estimator=est)
     assert trace.ticks[0].snapshot.estimates["b"][GPU.id] == Resources(vram=70)
