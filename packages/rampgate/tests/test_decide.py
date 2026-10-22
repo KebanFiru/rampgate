@@ -20,6 +20,7 @@ from rampgate import (
     GroupBarrier,
     GroupCompleted,
     GroupOutcome,
+    HintExceeded,
     InsufficientResources,
     InvalidTransition,
     JobState,
@@ -352,6 +353,32 @@ def test_no_foreign_warning_when_foreign_is_not_the_reason() -> None:
     dec = decide_on(d, 2.0)
     assert isinstance(dec.explanations["b"], InsufficientResources)
     assert of_type(dec, Warn) == []
+
+
+def test_hint_exceeded_once_per_attempt_and_cleared_when_it_ends() -> None:
+    hint = Resources(vram=40)
+    d = Driver().to(JobState.WARMING, "a", placement={GPU: hint}).observe(1.0, "a", vram=30)
+    assert of_type(decide_on(d, 1.0), Warn) == []
+    d.observe(2.0, "a", vram=50)
+    raised = decide_on(d, 2.0)
+    assert of_type(raised, Warn) == [Warn(HintExceeded("a", 1, GPU, hint, Resources(vram=50)))]
+    apply(d, raised).observe(3.0, "a", vram=70)
+    assert of_type(decide_on(d, 3.0), Warn) == []  # the peak grew, but the key is already active
+    d.exited(ExitKind.OOM, "a", t=4.0)
+    cleared = decide_on(d, 4.0)
+    assert of_type(cleared, WarnCleared) == [WarnCleared("HintExceeded", ("a", "1", GPU))]
+    assert not any(
+        isinstance(a, Warn) and isinstance(a.warning, HintExceeded) for a in cleared.actions
+    )
+
+
+def test_hint_exceeded_is_informational() -> None:
+    hint = Resources(vram=10)
+    d = Driver().to(JobState.WARMING, "a", placement={GPU: hint}).observe(1.0, "a", vram=20)
+    d.stable("a").submit("b", {GPU: Resources(vram=30)})
+    dec = decide_on(d, 2.0)
+    assert len(of_type(dec, Warn)) == 1
+    assert starts(dec) == ["b"]  # admission is unaffected
 
 
 def test_unknown_estimate_never_warns() -> None:

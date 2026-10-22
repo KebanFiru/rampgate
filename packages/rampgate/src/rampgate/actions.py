@@ -21,6 +21,7 @@ __all__ = [
     "ForeignUsageHigh",
     "GroupCompleted",
     "GroupOutcome",
+    "HintExceeded",
     "MarkStable",
     "Overcommitted",
     "QueueStopped",
@@ -159,6 +160,17 @@ class CapacityExceeded:
 
 
 @dataclass(frozen=True, slots=True)
+class HintExceeded:
+    """A running job's observed peak exceeds its declared hint (informational, per attempt)."""
+
+    job_id: JobId
+    attempt: int
+    device_id: DeviceId
+    hint: Resources
+    observed: Resources
+
+
+@dataclass(frozen=True, slots=True)
 class Overcommitted:
     """``sum(R) > C - F`` on a device; ``capacity`` is ``C - F``."""
 
@@ -201,7 +213,13 @@ class QueueStopped:
 
 
 WarningKind: TypeAlias = (
-    CapacityExceeded | Overcommitted | ForeignUsageHigh | UncleanStop | QueueStopped | Unreconciled
+    CapacityExceeded
+    | Overcommitted
+    | ForeignUsageHigh
+    | UncleanStop
+    | QueueStopped
+    | Unreconciled
+    | HintExceeded
 )
 
 
@@ -210,6 +228,7 @@ EDGE_TRIGGERED: tuple[type, ...] = (
     Overcommitted,
     ForeignUsageHigh,
     Unreconciled,
+    HintExceeded,
 )
 
 
@@ -225,6 +244,8 @@ def warning_key(w: WarningKind) -> tuple[str, tuple[str, ...]]:
             return kind, (w.job_id,)
         case UncleanStop():
             return kind, (w.job_id, str(w.attempt))
+        case HintExceeded():
+            return kind, (w.job_id, str(w.attempt), w.device_id)
         case QueueStopped():
             return kind, (w.group, w.job_id)
 

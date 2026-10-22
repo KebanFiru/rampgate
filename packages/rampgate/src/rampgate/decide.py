@@ -29,6 +29,7 @@ from rampgate.actions import (
     CapacityExceeded,
     ForeignUsageHigh,
     GroupCompleted,
+    HintExceeded,
     MarkStable,
     Overcommitted,
     QueueStopped,
@@ -475,8 +476,13 @@ def _edge_warnings(tick: _Tick) -> None:
             add(Overcommitted(d, load.reserved, load.available))
     for d, blocked in sorted(tick.foreign_blocked.items()):
         add(ForeignUsageHigh(d, loads[d].foreign, tuple(blocked)))
+    for rt in tick.jobs(*ACTIVE_STATES):
+        for d, hint in sorted(rt.job.placement.items()):
+            peak = rt.peak.get(d)
+            if hint is not None and peak is not None and peak.exceeds(hint):
+                add(HintExceeded(rt.id, rt.attempt, d, hint, peak))
 
-    owned = (CapacityExceeded, Overcommitted, ForeignUsageHigh)
+    owned = (CapacityExceeded, Overcommitted, ForeignUsageHigh, HintExceeded)
     active = {k: w for k, w in tick.state.active_warnings.items() if isinstance(w, owned)}
     if not tick.admission_evaluated:
         # Paused: the foreign-usage condition was not evaluated, so it keeps its state.

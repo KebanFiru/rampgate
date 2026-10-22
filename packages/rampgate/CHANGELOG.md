@@ -3,6 +3,7 @@
 ## Unreleased
 
 ### Added
+- `Warn(HintExceeded(job_id, attempt, device_id, hint, observed))`: edge-triggered, raised once per attempt when a running job's observed peak exceeds its declared hint, cleared when the attempt ends. Informational; admission ignores it (SPEC §3.6, I16).
 - Simulator & benchmark (L4): `Report` (with first-contact OOMs), `run`, `quantile`/`summarize`, baselines `GreedyFree`, `DeclaredReservation`, `Serial` and the ablations as `Strategy` rows (`MAIN`, `ABLATIONS`, `WARM`), `Admission` / `PROBATION` / `measured_free`, `RejectedByAdmission`, executor ground truth (`WorldStats`: lost work, usage integrals, overcommit, timeline), `ckpt_save_s`, foreign-load schedules, `SimJob.after`. `Resources` arithmetic skips re-validation (about 3x faster simulations, identical results).
 - Package skeleton (L0).
 - `Resources`: immutable non-negative resource vector with `+`, `-` (raises on underflow, eps-snapping), `sub(clamp=True)`, `scale`, `max`, `min`, `fits_in`, `exceeds`, `is_zero`, JSON round-trip; `KiB`/`MiB`/`GiB`/`TiB` constants (L0).
