@@ -9,7 +9,8 @@ Groups of runs:
 - ``main``: `MAIN` rows (cold) on every scenario, primary simulator settings;
 - ``ablations``: `ABLATIONS`;
 - ``warm``: `WARM` rows, each filled first by an independent run at ``seed + 10_000``;
-- ``sensitivity``: `MAIN` rows over ``start_delay_s`` x ``checkpoint_s``.
+- ``sensitivity``: `MAIN` rows over ``start_delay_s`` x ``checkpoint_s``;
+- ``margins``: `MARGIN_SWEEP`, ``trusted_margin`` x {cold, warm} (reported, not gated).
 
 The output depends only on the code and the arguments (no timestamps), so a
 rerun reproduces ``results.json`` byte for byte.
@@ -37,7 +38,17 @@ from scenarios import NAMES, SIM_KWARGS, make
 
 import rampgate
 from rampgate import Config, InMemoryHistoryStore, Resources
-from rampgate.sim import ABLATIONS, MAIN, STRATEGIES, WARM, Strategy, run, summarize
+from rampgate.sim import (
+    ABLATIONS,
+    MAIN,
+    MARGIN_SWEEP,
+    STRATEGIES,
+    TRUSTED_MARGINS,
+    WARM,
+    Strategy,
+    run,
+    summarize,
+)
 
 WARM_SEED_OFFSET = 10_000
 START_DELAYS = (15.0, 60.0, 120.0)
@@ -61,6 +72,7 @@ GROUPS: dict[str, tuple[Strategy, ...]] = {
     "ablations": ABLATIONS,
     "warm": WARM,
     "sensitivity": MAIN,
+    "margins": MARGIN_SWEEP,
 }
 
 
@@ -99,7 +111,7 @@ def tasks(args: argparse.Namespace) -> list[Task]:
         for scenario in args.scenarios:
             for delay, ckpt in settings:
                 for strategy in rows:
-                    for seed in range(args.seeds):
+                    for seed in seeds(args):
                         out.append(Task(group, scenario, strategy.name, seed, delay, ckpt))
     return out
 
@@ -208,6 +220,10 @@ def config_data(config: Config) -> dict[str, Any]:
     return out
 
 
+def seeds(args: argparse.Namespace) -> range:
+    return range(args.seed_start, args.seed_start + args.seeds)
+
+
 def git_commit() -> str:
     try:
         sha = subprocess.run(
@@ -229,9 +245,9 @@ def results_json(args: argparse.Namespace, runs: list[dict[str, Any]]) -> dict[s
     return {
         "meta": {
             "rampgate_version": rampgate.__version__,
-            "git_commit": git_commit(),
+            "git_commit": args.commit or git_commit(),
             "python": platform.python_version(),
-            "seeds": list(range(args.seeds)),
+            "seeds": list(seeds(args)),
             "warm_seed_offset": WARM_SEED_OFFSET,
             "sim": SIM_KWARGS,
             "max_time": {name: make(name, 0).max_time for name in args.scenarios},
@@ -311,6 +327,36 @@ def ooms_per_job_table(runs: list[dict[str, Any]], groups: Sequence[str]) -> lis
     return [*lines, ""]
 
 
+def margin_table(runs: list[dict[str, Any]]) -> list[str]:
+    rows = by((r for r in runs if r["group"] == "margins"), "scenario", "strategy")
+    lines = [
+        "Reported only: the default `trusted_margin` (1.05) was fixed in SPEC §5 before this"
+        " sweep ran. Median makespan in seconds (total OOMs over the seeds; median lost work"
+        " in step-s).",
+        "",
+    ]
+    for scenario in sorted({s for s, _ in rows}):
+        lines += [
+            f"#### {scenario}",
+            "",
+            "| trusted_margin | Cold | Warm |",
+            "|---|---|---|",
+        ]
+        for m in TRUSTED_MARGINS:
+            cells = []
+            for suffix in ("", " (warm)"):
+                rs = rows.get((scenario, f"Probation{suffix} [trusted_margin={m:.2f}]"), [])
+                if not rs:
+                    cells.append("-")
+                    continue
+                ooms = sum(int(r["oom_count"]) for r in rs)
+                lost = median(rs, "lost_work_step_s")
+                cells.append(f"{fmt(median(rs, 'makespan'))} ({ooms}; {fmt(lost)})")
+            lines.append(f"| {m:.2f} | " + " | ".join(cells) + " |")
+        lines.append("")
+    return lines
+
+
 def sensitivity_table(runs: list[dict[str, Any]]) -> list[str]:
     rows = by(
         (r for r in runs if r["group"] == "sensitivity"),
@@ -351,7 +397,7 @@ def results_md(data: dict[str, Any], failures: list[str], notes: list[str]) -> s
         "# rampgate benchmark results",
         "",
         f"rampgate {meta['rampgate_version']}, commit `{meta['git_commit']}`,"
-        f" Python {meta['python']}, seeds 0-{len(meta['seeds']) - 1}"
+        f" Python {meta['python']}, seeds {meta['seeds'][0]}-{meta['seeds'][-1]}"
         f" (warm runs pre-filled from seed + {meta['warm_seed_offset']}).",
         f"Simulator: {', '.join(f'{k}={v}' for k, v in meta['sim'].items())}.",
         "Cells: median [Q1-Q3] over the seeds; `> max_time` marks censored runs.",
@@ -371,6 +417,8 @@ def results_md(data: dict[str, Any], failures: list[str], notes: list[str]) -> s
     lines += ["## OOMs per job", "", *ooms_per_job_table(runs, ("main", "warm"))]
     if "sensitivity" in meta["groups"]:
         lines += ["## Sensitivity", "", *sensitivity_table(runs)]
+    if "margins" in meta["groups"]:
+        lines += ["## trusted_margin sweep", "", *margin_table(runs)]
     lines += ["## Acceptance (SPEC §12 L4)", ""]
     lines += [f"- FAIL: {f}" for f in failures] or ["- All criteria met."]
     lines += ["", "Target (not a gate):", ""] + [f"- {n}" for n in notes] + [""]
@@ -379,7 +427,16 @@ def results_md(data: dict[str, Any], failures: list[str], notes: list[str]) -> s
 
 def main(argv: Sequence[str] | None = None) -> int:
     parser = argparse.ArgumentParser(description=__doc__.splitlines()[0])
-    parser.add_argument("--seeds", type=int, default=10)
+    parser.add_argument("--seeds", type=int, default=10, help="number of seeds")
+    parser.add_argument(
+        "--seed-start",
+        type=int,
+        default=0,
+        help="first seed: 0 = development seeds 0-9, 1000 = held-out seeds (SPEC §12)",
+    )
+    parser.add_argument(
+        "--commit", help="commit to record in results.json (when git is not available)"
+    )
     parser.add_argument("--scenarios", nargs="+", default=list(NAMES), choices=NAMES)
     parser.add_argument("--strategies", nargs="+", default=[], choices=sorted(STRATEGIES))
     parser.add_argument("--groups", nargs="+", default=list(GROUPS), choices=list(GROUPS))

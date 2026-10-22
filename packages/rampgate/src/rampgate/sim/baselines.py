@@ -21,10 +21,12 @@ __all__ = [
     "ABLATIONS",
     "BASELINES",
     "MAIN",
+    "MARGIN_SWEEP",
     "PROBATION_ALL",
     "PROBATION_COLD",
     "PROBATION_WARM",
     "STRATEGIES",
+    "TRUSTED_MARGINS",
     "UNBOUNDED_RETRIES",
     "WARM",
     "DeclaredReservation",
@@ -173,4 +175,13 @@ ABLATIONS = (
     Strategy("rampgate - Rule P", ProbationAdmission("rampgate - Rule P", probation=False)),
     Strategy("rampgate - history", estimator="null"),
 )
-STRATEGIES = {s.name: s for s in (*MAIN, *ABLATIONS, *WARM)}
+TRUSTED_MARGINS = (1.00, 1.05, 1.10, 1.15)
+# Reported only (SPEC §5): the default trusted_margin is not picked from this sweep.
+MARGIN_SWEEP = tuple(
+    Strategy(
+        f"Probation{suffix} [trusted_margin={m:.2f}]", config=Config(trusted_margin=m), warm=warm
+    )
+    for m in TRUSTED_MARGINS
+    for suffix, warm in (("", False), (" (warm)", True))
+)
+STRATEGIES = {s.name: s for s in (*MAIN, *ABLATIONS, *WARM, *MARGIN_SWEEP)}
