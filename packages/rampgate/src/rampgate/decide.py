@@ -132,14 +132,14 @@ def _is_warming_like(rt: JobRuntime) -> bool:
 
 
 def _warming_load(rt: JobRuntime, d: DeviceId, config: Config) -> Resources:
-    """``W_j,d`` (SPEC §5): ``max(E * margin, usage)`` for a trusted estimate, otherwise
+    """``W_j,d`` (SPEC §5): ``max(E * trusted_margin, usage)`` for a trusted estimate, otherwise
     ``max(E, usage)`` with the estimate used at admission (0 if it was unknown)."""
     usage = rt.usage.get(d, Resources())
     estimate = rt.admitted_estimate.get(d)
     if estimate is None:
         return usage
     if d in rt.trusted:
-        return usage.max(estimate.scale(config.safety_margin))
+        return usage.max(estimate.scale(config.trusted_margin))
     return usage.max(estimate)
 
 
@@ -399,7 +399,7 @@ def _admit(tick: _Tick, policy: OrderingPolicy, admission: Admission) -> None:
             for d in devices:
                 e = estimates[d] or Resources()
                 if d in trusted:
-                    extra = loads[d].warming_usage + e.scale(tick.config.safety_margin)
+                    extra = loads[d].warming_usage + e.scale(tick.config.trusted_margin)
                     loads[d] = replace(loads[d], warming_usage=extra)
                     continue
                 warming[d] = rt.id

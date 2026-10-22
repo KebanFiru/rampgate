@@ -15,7 +15,10 @@ __all__ = ["Config"]
 class Config:
     """Algorithm thresholds. Times are in seconds of the caller's clock."""
 
+    # Reservations based on one observation (a STABLE job's peak).
     safety_margin: float = 1.15
+    # A trusted STARTING/WARMING job: its estimate is already a max of observations.
+    trusted_margin: float = 1.05
     min_warmup_s: float = 30
     stable_window_s: float = 60
     stable_min_steps: int = 20
@@ -57,6 +60,8 @@ class Config:
                 raise TypeError(f"{name} must be an int")
         if self.safety_margin < 1:
             raise ValueError("safety_margin must be >= 1")
+        if self.trusted_margin < 1:
+            raise ValueError("trusted_margin must be >= 1")
         if self.oom_growth <= 1:
             raise ValueError("oom_growth must be > 1, otherwise an OOM teaches nothing")
         if self.min_warmup_s > self.max_warmup_s:

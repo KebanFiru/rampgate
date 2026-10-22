@@ -3,6 +3,7 @@
 ## Unreleased
 
 ### Added
+- `Config.trusted_margin` (default 1.05): a trusted STARTING/WARMING job counts as `max(E × trusted_margin, usage)`; `safety_margin` (1.15) stays for reservations from one observation (SPEC §5; changed after the first benchmark results).
 - `Report.ooms_per_job`, `max_job_ooms`, `repeat_device_ooms`; `TimelineEntry.device` names the device of an OOM kill.
 - `Report.first_contact_unknown` / `first_contact_hint`: first-contact means no observation-based estimate (no history record at any level, first attempt); a job admitted on its declared hint alone counts (SPEC §12 L4 clarification).
 - `Warn(HintExceeded(job_id, attempt, device_id, hint, observed))`: edge-triggered, raised once per attempt when a running job's observed peak exceeds its declared hint, cleared when the attempt ends. Informational; admission ignores it (SPEC §3.6, I16).

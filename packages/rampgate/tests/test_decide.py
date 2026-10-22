@@ -499,7 +499,7 @@ def trusted_snapshot(d: Driver, job: str, vram: float) -> Snapshot:
     return Snapshot(d.state, {job: {GPU: Resources(vram=vram)}}, frozenset({(job, GPU)}))
 
 
-def test_trusted_job_skips_probation_and_counts_estimate_times_margin() -> None:
+def test_trusted_job_skips_probation_and_counts_estimate_times_trusted_margin() -> None:
     d = Driver().to(JobState.WARMING, "a").observe(1.0, "a", vram=10).submit("b")
     dec = decide(trusted_snapshot(d, "b", 20), 2.0, d.config, FifoPolicy(strict=False))
     (start,) = [a for a in dec.actions if isinstance(a, Start)]
@@ -507,9 +507,25 @@ def test_trusted_job_skips_probation_and_counts_estimate_times_margin() -> None:
     apply(d, dec)
     loads = device_loads(d.state, 2.0, d.config)
     assert loads[GPU].warming_job == "a"  # b does not take the probation slot
-    assert loads[GPU].warming_usage == Resources(vram=10) + Resources(vram=20).scale(1.15)
+    assert loads[GPU].warming_usage == Resources(vram=10) + Resources(vram=20).scale(1.05)
     d.started("b", t=2.0).observe(3.0, "b", vram=30)  # usage above E * margin wins
     assert device_loads(d.state, 3.0, d.config)[GPU].warming_usage == Resources(vram=40)
+
+
+def test_trusted_margin_is_separate_from_safety_margin() -> None:
+    # Same-tick bookkeeping: b (trusted, 60) counts 60 * 1.05 = 63, so c (trusted, 30) fits
+    # in 100 - 63 = 37 but would not with 60 * 1.15 = 69 (31 left).
+    cfg = Config(trusted_margin=1.05, safety_margin=1.15)
+    d = Driver(config=cfg).submit("b").submit("c")
+    snapshot = Snapshot(
+        d.state,
+        {"b": {GPU: Resources(vram=60)}, "c": {GPU: Resources(vram=35)}},
+        frozenset({("b", GPU), ("c", GPU)}),
+    )
+    assert starts(decide(snapshot, 0.0, d.config, FifoPolicy(strict=False))) == ["b", "c"]
+    strict = Driver(config=Config(trusted_margin=1.15)).submit("b").submit("c")
+    snapshot = Snapshot(strict.state, snapshot.estimates, snapshot.trusted)
+    assert starts(decide(snapshot, 0.0, strict.config, FifoPolicy(strict=False))) == ["b"]
 
 
 def test_untrusted_job_waits_next_to_a_trusted_warming_job_only_for_capacity() -> None:
