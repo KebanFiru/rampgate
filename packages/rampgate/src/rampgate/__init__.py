@@ -41,6 +41,7 @@ from rampgate.engine import Engine
 from rampgate.estimators import (
     EstimateResult,
     Estimator,
+    HistoryEntry,
     HistoryEstimator,
     HistoryStore,
     InMemoryHistoryStore,
@@ -153,6 +154,7 @@ __all__ = [
     "GroupId",
     "GroupOutcome",
     "HintExceeded",
+    "HistoryEntry",
     "HistoryEstimator",
     "HistoryRecord",
     "HistoryStore",

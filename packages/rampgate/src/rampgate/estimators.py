@@ -22,6 +22,7 @@ from rampgate.resources import Resources
 __all__ = [
     "EstimateResult",
     "Estimator",
+    "HistoryEntry",
     "HistoryEstimator",
     "HistoryStore",
     "InMemoryHistoryStore",
@@ -68,6 +69,30 @@ class Estimator(Protocol):
     ) -> None: ...
 
 
+@dataclass(frozen=True, slots=True)
+class HistoryEntry:
+    """What a `HistoryStore` holds for one (key, device kind).
+
+    - ``complete``: the per-dimension max of the complete records (``peak``,
+      ``running``), None if there is none.
+    - ``lower_bound``: the per-dimension max of the lower-bound records that are
+      **newer** than the newest complete record (all of them if there is none),
+      None if there is none. An older OOM never overrides a later observation.
+    """
+
+    complete: Resources | None
+    lower_bound: Resources | None
+
+    @property
+    def value(self) -> Resources:
+        """``max(complete, lower_bound)``."""
+        known = [r for r in (self.complete, self.lower_bound) if r is not None]
+        out = known[0]
+        for r in known[1:]:
+            out = out.max(r)
+        return out
+
+
 class HistoryStore(Protocol):
     """Durable peak history. ``put`` max-merges by ``(key, device_kind, record_id)``.
 
@@ -81,12 +106,15 @@ class HistoryStore(Protocol):
     (an OOM, or a job stopped before it finished): the job needed *more than* this,
     not this. Complete observations have ``lower_bound=False``: ``peak`` records
     (SUCCESS) and ``running`` records (STABLE, Rule H; Rule S saw the ramp complete).
-    `HistoryEstimator` puts lower bounds under ``key + LOWER_BOUND_SUFFIX``, apart
-    from complete observations, and only a complete level-0 estimate is trusted
-    (SPEC §5, §7).
+
+    **Order.** The store numbers records by arrival: a put that changes a record's
+    stored value (a new record, or a larger value for its id) gives it the next
+    sequence number; a put that changes nothing leaves it as it was, so replaying
+    a record never makes it newer. ``get`` uses that order to drop lower bounds
+    older than the newest complete record (SPEC §5, §7).
     """
 
-    def get(self, key: str, device_kind: str) -> Resources | None: ...
+    def get(self, key: str, device_kind: str) -> HistoryEntry | None: ...
 
     def put(
         self,
@@ -103,20 +131,33 @@ def default_device_kind(device: Device) -> str:
     return device.labels.get("kind", device.id)
 
 
-class InMemoryHistoryStore:
-    """Keeps the component-wise max of everything put per (key, device kind).
+@dataclass(frozen=True, slots=True)
+class _Stored:
+    value: Resources
+    lower_bound: bool
+    seq: int
 
-    Records with a ``record_id`` are max-merged per (key, device kind, record id);
-    ``puts_applied`` counts the puts that changed something.
+
+class InMemoryHistoryStore:
+    """Keeps every record (max-merged by record id) with its arrival order.
+
+    A put without a ``record_id`` is a record of its own. ``puts_applied`` counts
+    the puts that changed something.
     """
 
     def __init__(self) -> None:
-        self._data: dict[tuple[str, str], Resources] = {}
-        self._applied: dict[tuple[str, str, str], Resources] = {}
+        self._records: dict[tuple[str, str], dict[str, _Stored]] = {}
+        self._seq = 0
         self.puts_applied = 0
 
-    def get(self, key: str, device_kind: str) -> Resources | None:
-        return self._data.get((key, device_kind))
+    def get(self, key: str, device_kind: str) -> HistoryEntry | None:
+        records = self._records.get((key, device_kind))
+        if not records:
+            return None
+        complete = [r for r in records.values() if not r.lower_bound]
+        newest = max((r.seq for r in complete), default=-1)
+        lower = [r for r in records.values() if r.lower_bound and r.seq > newest]
+        return HistoryEntry(_max(r.value for r in complete), _max(r.value for r in lower))
 
     def put(
         self,
@@ -127,47 +168,71 @@ class InMemoryHistoryStore:
         lower_bound: bool,
         record_id: str | None = None,
     ) -> None:
-        if record_id is not None:
-            seen = self._applied.get((key, device_kind, record_id))
-            merged = peak if seen is None else seen.max(peak)
-            if merged == seen:
-                return
-            self._applied[(key, device_kind, record_id)] = merged
-        old = self._data.get((key, device_kind))
-        self._data[(key, device_kind)] = peak if old is None else old.max(peak)
+        records = self._records.setdefault((key, device_kind), {})
+        rid = record_id if record_id is not None else f"\x00anonymous:{self._seq}"
+        seen = records.get(rid)
+        merged = peak if seen is None else seen.value.max(peak)
+        if seen is not None and merged == seen.value:
+            return
+        self._seq += 1
+        records[rid] = _Stored(merged, lower_bound, self._seq)
         self.puts_applied += 1
 
     def to_json(self) -> dict[str, Any]:
-        """Peaks and applied records (id and merged value), sorted, for ``json.dumps``."""
+        """Records (key, kind, id, lower bound, sequence, value), sorted, for ``json.dumps``."""
         return {
-            "peaks": [[k, kind, peak.to_json()] for (k, kind), peak in sorted(self._data.items())],
-            "applied": [[*a, peak.to_json()] for a, peak in sorted(self._applied.items())],
+            "seq": self._seq,
+            "records": [
+                [key, kind, rid, r.lower_bound, r.seq, r.value.to_json()]
+                for (key, kind), records in sorted(self._records.items())
+                for rid, r in sorted(records.items())
+            ],
         }
 
     @classmethod
     def from_json(cls, data: Mapping[str, Any]) -> InMemoryHistoryStore:
         store = cls()
-        for key, kind, peak in data["peaks"]:
-            store._data[(str(key), str(kind))] = Resources.from_json(peak)
-        for k, kind, r, *peak in data["applied"]:
+        if "records" not in data:
+            return cls._from_legacy(data)
+        store._seq = int(data["seq"])
+        for key, kind, rid, lower, seq, value in data["records"]:
+            records = store._records.setdefault((str(key), str(kind)), {})
+            records[str(rid)] = _Stored(Resources.from_json(value), bool(lower), int(seq))
+        return store
+
+    @classmethod
+    def _from_legacy(cls, data: Mapping[str, Any]) -> InMemoryHistoryStore:
+        """Before the arrival order, all at sequence 0. Applied records keep their id
+        (its last part is the kind, so ``lower_bound``); each merged peak is kept as a
+        record too, a lower bound only if every applied record of its key is one."""
+        store = cls()
+        for k, kind, rid, *peak in data["applied"]:
             # Before max-merge (L3), only the ids were kept.
             value = Resources.from_json(peak[0]) if peak else Resources()
-            store._applied[(str(k), str(kind), str(r))] = value
+            lower = str(rid).endswith(":lower_bound")
+            store._records.setdefault((str(k), str(kind)), {})[str(rid)] = _Stored(value, lower, 0)
+        for key, kind, peak in data["peaks"]:
+            records = store._records.setdefault((str(key), str(kind)), {})
+            lower = bool(records) and all(r.lower_bound for r in records.values())
+            records["\x00legacy"] = _Stored(Resources.from_json(peak), lower, 0)
         return store
 
 
-# Lower bounds (OOM or stop) are stored under ``key + LOWER_BOUND_SUFFIX``, apart from
-# complete observations, so an estimate knows whether it is complete (SPEC §5, §7).
-LOWER_BOUND_SUFFIX = "\x1flower_bound"
+def _max(values: Iterable[Resources]) -> Resources | None:
+    out: Resources | None = None
+    for v in values:
+        out = v if out is None else out.max(v)
+    return out
 
 
 class HistoryEstimator:
     """Learns peaks per fingerprint key (Rule H).
 
-    ``record`` writes to every key of ``job.fingerprint`` (lower bounds to the
-    key plus `LOWER_BOUND_SUFFIX`); ``estimate`` returns, for the most specific
-    key that has data, the max of its complete and lower-bound values, complete
-    only if it has a complete record.
+    ``record`` writes to every key of ``job.fingerprint``; ``estimate`` returns,
+    for the most specific key that has data, ``max(complete, newer lower bound)``.
+    The result is complete only if a complete record gives the value: a lower
+    bound alone, or a newer lower bound above the complete value, says the job
+    needs *more than* that, so the estimate is untrusted (SPEC §5).
     """
 
     def __init__(
@@ -185,12 +250,13 @@ class HistoryEstimator:
     def estimate(self, job: Job, device: Device) -> EstimateResult | None:
         kind = self.device_kind(device)
         for level, key in enumerate(job.fingerprint):
-            full = self.store.get(key, kind)
-            lower = self.store.get(key + LOWER_BOUND_SUFFIX, kind)
-            if full is not None:
-                return EstimateResult(full if lower is None else full.max(lower), level)
-            if lower is not None:
-                return EstimateResult(lower, level, complete=False)
+            entry = self.store.get(key, kind)
+            if entry is None:
+                continue
+            complete = entry.complete is not None and (
+                entry.lower_bound is None or not entry.lower_bound.exceeds(entry.complete)
+            )
+            return EstimateResult(entry.value, level, complete=complete)
         return None
 
     def record(
@@ -204,8 +270,7 @@ class HistoryEstimator:
     ) -> None:
         kind = self.device_kind(device)
         for key in job.fingerprint:
-            target = key + LOWER_BOUND_SUFFIX if lower_bound else key
-            self.store.put(target, kind, peak, lower_bound=lower_bound, record_id=record_id)
+            self.store.put(key, kind, peak, lower_bound=lower_bound, record_id=record_id)
 
 
 class NullEstimator:

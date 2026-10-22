@@ -15,6 +15,7 @@ from rampgate import (
     ExitKind,
     FifoPolicy,
     IgnoreReason,
+    InMemoryHistoryStore,
     Job,
     JobExited,
     JobObserved,
@@ -185,3 +186,10 @@ def apply(d: Driver, decision: Decision) -> Driver:
 def examples(fraction: float) -> int:
     """Example count for an expensive hypothesis test, scaled from the active profile."""
     return max(5, int(settings().max_examples * fraction))
+
+
+def stored(store: InMemoryHistoryStore, key: str, kind: str) -> Resources:
+    """The value a store holds for (key, kind): ``max(complete, newer lower bound)``."""
+    entry = store.get(key, kind)
+    assert entry is not None, (key, kind)
+    return entry.value

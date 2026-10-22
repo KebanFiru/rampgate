@@ -1,11 +1,14 @@
 """Estimators and history stores (SPEC §7)."""
 
+import json
+
 import pytest
 
 from rampgate import (
     Device,
     EstimateResult,
     ExitKind,
+    HistoryEntry,
     HistoryEstimator,
     HistoryRecord,
     InMemoryHistoryStore,
@@ -18,7 +21,7 @@ from rampgate import (
     drain,
     resolve_estimates,
 )
-from rampgate_testkit import GPU, Driver
+from rampgate_testkit import GPU, Driver, stored
 
 A100 = Device("node/gpu:0", Resources(vram=80), {"kind": "a100"})
 A100b = Device("node/gpu:1", Resources(vram=80), {"kind": "a100"})
@@ -34,7 +37,7 @@ def test_in_memory_store_keeps_max() -> None:
     assert store.get("k", "a100") is None
     store.put("k", "a100", Resources(vram=10, ram=5), lower_bound=False)
     store.put("k", "a100", Resources(vram=8, ram=9), lower_bound=True)
-    assert store.get("k", "a100") == Resources(vram=10, ram=9)
+    assert stored(store, "k", "a100") == Resources(vram=10, ram=9)
     assert store.get("k", "h100") is None
 
 
@@ -69,7 +72,8 @@ def test_history_estimator_lower_bounds_raise_the_estimate() -> None:
     est = HistoryEstimator(InMemoryHistoryStore())
     est.record(job("k"), A100, Resources(vram=20))
     est.record(job("k"), A100, Resources(vram=30), lower_bound=True)
-    assert est.estimate(job("k"), A100) == EstimateResult(Resources(vram=30), 0)
+    # Newer than the success and above it: counted, but "more than 30" is not trusted.
+    assert est.estimate(job("k"), A100) == EstimateResult(Resources(vram=30), 0, complete=False)
 
 
 def test_lower_bounds_alone_are_not_trusted() -> None:
@@ -84,9 +88,9 @@ def test_lower_bounds_alone_are_not_trusted() -> None:
     assert est.estimate(job("k", "family"), A100) == EstimateResult(
         Resources(vram=15), 0, complete=False
     )
-    est.record(job("k"), A100, Resources(vram=10))  # a complete record at level 0
+    est.record(job("k"), A100, Resources(vram=10))  # a complete record at level 0, newer
     result = est.estimate(job("k", "family"), A100)
-    assert result == EstimateResult(Resources(vram=15), 0)  # max with the lower bound
+    assert result == EstimateResult(Resources(vram=10), 0)  # the older lower bound is dropped
     assert result is not None
     assert result.trusted
 
@@ -99,6 +103,68 @@ def test_a_running_record_makes_siblings_trusted() -> None:
     snap = resolve_estimates(d.state, est)
     assert snap.estimates["sibling"][GPU] == Resources(vram=40)
     assert snap.is_trusted(d.state.jobs["sibling"], GPU)
+
+
+def test_an_older_lower_bound_does_not_override_a_later_success() -> None:
+    est = HistoryEstimator(InMemoryHistoryStore())
+    est.record(job("k"), A100, Resources(vram=8), lower_bound=True, record_id="x:1:d:lower_bound")
+    est.record(job("k"), A100, Resources(vram=6.4), record_id="y:1:d:peak")
+    assert est.estimate(job("k"), A100) == EstimateResult(Resources(vram=6.4), 0)
+
+
+def test_a_newer_lower_bound_above_the_complete_value_counts_and_is_untrusted() -> None:
+    est = HistoryEstimator(InMemoryHistoryStore())
+    est.record(job("k"), A100, Resources(vram=36), record_id="x:1:d:peak")
+    est.record(job("k"), A100, Resources(vram=40), lower_bound=True, record_id="y:1:d:lower_bound")
+    result = est.estimate(job("k"), A100)
+    assert result == EstimateResult(Resources(vram=40), 0, complete=False)
+    est.record(job("k"), A100, Resources(vram=30), record_id="z:1:d:peak")  # a later success
+    assert est.estimate(job("k"), A100) == EstimateResult(Resources(vram=36), 0)
+
+
+def test_a_newer_lower_bound_below_the_complete_value_keeps_it_trusted() -> None:
+    est = HistoryEstimator(InMemoryHistoryStore())
+    est.record(job("k"), A100, Resources(vram=36), record_id="x:1:d:peak")
+    est.record(job("k"), A100, Resources(vram=20), lower_bound=True, record_id="y:1:d:lower_bound")
+    assert est.estimate(job("k"), A100) == EstimateResult(Resources(vram=36), 0)
+
+
+def test_replaying_a_record_does_not_make_it_newer() -> None:
+    store = InMemoryHistoryStore()
+    store.put("k", "a100", Resources(vram=8), lower_bound=True, record_id="old:lower_bound")
+    store.put("k", "a100", Resources(vram=6), lower_bound=False, record_id="new:peak")
+    store.put("k", "a100", Resources(vram=8), lower_bound=True, record_id="old:lower_bound")
+    assert store.get("k", "a100") == HistoryEntry(Resources(vram=6), None)
+    assert store.puts_applied == 2
+
+
+def test_a_grown_running_record_is_newer() -> None:
+    store = InMemoryHistoryStore()
+    store.put("k", "a100", Resources(vram=40), lower_bound=False, record_id="r:running")
+    store.put("k", "a100", Resources(vram=45), lower_bound=True, record_id="o:lower_bound")
+    assert store.get("k", "a100") == HistoryEntry(Resources(vram=40), Resources(vram=45))
+    store.put("k", "a100", Resources(vram=42), lower_bound=False, record_id="r:running")
+    assert store.get("k", "a100") == HistoryEntry(Resources(vram=42), None)
+
+
+def test_store_json_round_trip_keeps_the_order() -> None:
+    store = InMemoryHistoryStore()
+    store.put("k", "a100", Resources(vram=8), lower_bound=True, record_id="a:lower_bound")
+    store.put("k", "a100", Resources(vram=6), lower_bound=False, record_id="b:peak")
+    back = InMemoryHistoryStore.from_json(json.loads(json.dumps(store.to_json())))
+    assert back.get("k", "a100") == store.get("k", "a100")
+    back.put("k", "a100", Resources(vram=9), lower_bound=True, record_id="c:lower_bound")
+    assert back.get("k", "a100") == HistoryEntry(Resources(vram=6), Resources(vram=9))
+
+
+def test_legacy_store_json_loads() -> None:
+    legacy = {
+        "peaks": [["k", "a100", {"vram": 8.0}], ["m", "a100", {"vram": 3.0}]],
+        "applied": [["k", "a100", "j:1:d:lower_bound", {"vram": 8.0}]],
+    }
+    store = InMemoryHistoryStore.from_json(legacy)
+    assert store.get("k", "a100") == HistoryEntry(None, Resources(vram=8))
+    assert store.get("m", "a100") == HistoryEntry(Resources(vram=3), None)
 
 
 def test_only_max_aggregate() -> None:
@@ -155,4 +221,4 @@ def test_rule_h_running_record_at_stable_and_rewritten_on_reservation_growth() -
     d2 = Driver().submit("j", fingerprint=("k",)).start().started()
     d2.observe(1.0, vram=40).stable().observe(3.0, vram=60)
     apply_history(est, d2.state, reversed(d2.state.history_records))
-    assert store.get("k", GPU) == Resources(vram=60)
+    assert stored(store, "k", GPU) == Resources(vram=60)

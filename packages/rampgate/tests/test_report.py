@@ -38,7 +38,7 @@ from rampgate.sim import (
     simulate,
     summarize,
 )
-from rampgate_testkit import examples
+from rampgate_testkit import examples, stored
 
 GPU = Device("gpu:0", Resources(vram=100))
 FAST = Config(min_warmup_s=5, stable_window_s=10, stable_min_steps=5, stable_requires_epoch=False)
@@ -194,7 +194,7 @@ def test_run_builds_the_estimator_and_uses_the_store() -> None:
     rep = run(scenario, PROBATION_COLD, policy=FifoPolicy())
     assert rep.completed == 1
     run(scenario, PROBATION_COLD, policy=FifoPolicy(), history_store=store)
-    assert store.get("k", GPU.id) == Resources(vram=40)
+    assert stored(store, "k", GPU.id) == Resources(vram=40)
     null = run(scenario, STRATEGIES["rampgate - history"], policy=FifoPolicy())
     assert null.completed == 1
 

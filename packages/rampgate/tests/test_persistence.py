@@ -20,6 +20,7 @@ from rampgate import (
     EstimateResult,
     ExitKind,
     FifoPolicy,
+    HistoryEntry,
     HistoryEstimator,
     HistoryRecord,
     InMemoryHistoryStore,
@@ -50,7 +51,7 @@ from rampgate import (
 from rampgate.model import frozen_map
 from rampgate.serialization import MIGRATIONS, SCHEMA_VERSION, from_data, to_data
 from rampgate.sim import RampPlateau, Scenario, SimJob, simulate
-from rampgate_testkit import GPU, GPU1, Driver, examples, gpus
+from rampgate_testkit import GPU, GPU1, Driver, examples, gpus, stored
 from test_invariants import (
     CFG,
     check_explained,
@@ -151,7 +152,7 @@ def test_in_memory_store_json_roundtrip() -> None:
     store = InMemoryHistoryStore()
     store.put("k", "a100", Resources(vram=3), lower_bound=False)
     back = InMemoryHistoryStore.from_json(json.loads(json.dumps(store.to_json())))
-    assert back.get("k", "a100") == Resources(vram=3)
+    assert stored(back, "k", "a100") == Resources(vram=3)
 
 
 # -- Engine API ------------------------------------------------------------------------------------
@@ -296,7 +297,7 @@ def test_restart_keeps_learning_with_a_durable_store() -> None:
     )
     scenario = Scenario((Device(GPU, Resources(vram=100)),), (job,))
     simulate(scenario, FifoPolicy(), estimator=HistoryEstimator(store), restart_at=10.0)
-    assert store.get("m", GPU) == Resources(vram=30)
+    assert stored(store, "m", GPU) == Resources(vram=30)
 
 
 def test_encoder_rejects_foreign_dataclasses() -> None:
@@ -411,14 +412,14 @@ def test_crash_between_put_and_dump_applies_history_once() -> None:
     again = Engine.load(json.loads(before_tick), policy=FifoPolicy(), estimator=est)
     again.tick(4.0)
     assert store.puts_applied == 2
-    assert store.get("m", GPU) == Resources(vram=40)
+    assert stored(store, "m", GPU) == Resources(vram=40)
     copy = InMemoryHistoryStore.from_json(json.loads(json.dumps(store.to_json())))
     assert copy.to_json() == store.to_json()
     copy.put("m", GPU, Resources(vram=40), lower_bound=False, record_id=f"a:1:{GPU}:peak")
     assert copy.puts_applied == 0  # the same record again changes nothing
     # A record id is max-merged: a larger value with the same id raises it (Rule H, §7).
     copy.put("m", GPU, Resources(vram=99), lower_bound=False, record_id=f"a:1:{GPU}:peak")
-    assert copy.get("m", GPU) == Resources(vram=99)
+    assert stored(copy, "m", GPU) == Resources(vram=99)
 
 
 def test_store_max_merge_is_idempotent_and_order_independent() -> None:
@@ -428,17 +429,17 @@ def test_store_max_merge_is_idempotent_and_order_independent() -> None:
         store = InMemoryHistoryStore()
         for peak in order:
             store.put("k", GPU, peak, lower_bound=True, record_id="r")
-        results.append(store.to_json())
+        results.append(store.get("k", GPU))
     assert results[0] == results[1] == results[2]
-    assert results[0]["applied"] == [["k", GPU, "r", {"ram": 50, "vram": 30}]]
+    assert results[0] == HistoryEntry(None, Resources(vram=30, ram=50))
 
 
 def test_store_loads_the_l3_json_format() -> None:
     old = {"peaks": [["k", GPU, {"vram": 4}]], "applied": [["k", GPU, "r"]]}
     store = InMemoryHistoryStore.from_json(old)
-    assert store.get("k", GPU) == Resources(vram=4)
+    assert stored(store, "k", GPU) == Resources(vram=4)
     store.put("k", GPU, Resources(vram=2), lower_bound=False, record_id="r")
-    assert store.get("k", GPU) == Resources(vram=4)
+    assert stored(store, "k", GPU) == Resources(vram=4)
 
 
 # -- restarts and downtime (L3 follow-up) ----------------------------------------------------------
