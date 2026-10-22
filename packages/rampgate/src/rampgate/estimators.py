@@ -37,16 +37,19 @@ __all__ = [
 class EstimateResult:
     """An estimate and the index of the fingerprint key that produced it.
 
-    ``level == 0`` is the most specific key (the exact template and config):
-    only such an estimate is *trusted* and lets a job skip probation (SPEC §5).
+    ``level == 0`` is the most specific key (the exact template and config).
+    ``complete``: the value includes a full observation of a ramp (a ``peak`` or
+    ``running`` record), not only lower bounds from OOMs or stops. Only a complete
+    level-0 estimate is *trusted* and lets a job skip probation (SPEC §5).
     """
 
     value: Resources
     level: int = 0
+    complete: bool = True
 
     @property
     def trusted(self) -> bool:
-        return self.level == 0
+        return self.level == 0 and self.complete
 
 
 class Estimator(Protocol):
@@ -73,6 +76,14 @@ class HistoryStore(Protocol):
     estimator before the next ``dump``; after a crash in between, the restored
     engine hands it over again. A running record (Rule H) is also written again
     with a larger peak when the job's reservation grows.
+
+    ``lower_bound=True`` means the value is a lower bound from a failure or a stop
+    (an OOM, or a job stopped before it finished): the job needed *more than* this,
+    not this. Complete observations have ``lower_bound=False``: ``peak`` records
+    (SUCCESS) and ``running`` records (STABLE, Rule H; Rule S saw the ramp complete).
+    `HistoryEstimator` puts lower bounds under ``key + LOWER_BOUND_SUFFIX``, apart
+    from complete observations, and only a complete level-0 estimate is trusted
+    (SPEC §5, §7).
     """
 
     def get(self, key: str, device_kind: str) -> Resources | None: ...
@@ -145,11 +156,18 @@ class InMemoryHistoryStore:
         return store
 
 
+# Lower bounds (OOM or stop) are stored under ``key + LOWER_BOUND_SUFFIX``, apart from
+# complete observations, so an estimate knows whether it is complete (SPEC §5, §7).
+LOWER_BOUND_SUFFIX = "\x1flower_bound"
+
+
 class HistoryEstimator:
     """Learns peaks per fingerprint key (Rule H).
 
-    ``record`` writes to every key of ``job.fingerprint``; ``estimate`` returns
-    the value of the most specific key that has data.
+    ``record`` writes to every key of ``job.fingerprint`` (lower bounds to the
+    key plus `LOWER_BOUND_SUFFIX`); ``estimate`` returns, for the most specific
+    key that has data, the max of its complete and lower-bound values, complete
+    only if it has a complete record.
     """
 
     def __init__(
@@ -167,9 +185,12 @@ class HistoryEstimator:
     def estimate(self, job: Job, device: Device) -> EstimateResult | None:
         kind = self.device_kind(device)
         for level, key in enumerate(job.fingerprint):
-            value = self.store.get(key, kind)
-            if value is not None:
-                return EstimateResult(value, level)
+            full = self.store.get(key, kind)
+            lower = self.store.get(key + LOWER_BOUND_SUFFIX, kind)
+            if full is not None:
+                return EstimateResult(full if lower is None else full.max(lower), level)
+            if lower is not None:
+                return EstimateResult(lower, level, complete=False)
         return None
 
     def record(
@@ -183,7 +204,8 @@ class HistoryEstimator:
     ) -> None:
         kind = self.device_kind(device)
         for key in job.fingerprint:
-            self.store.put(key, kind, peak, lower_bound=lower_bound, record_id=record_id)
+            target = key + LOWER_BOUND_SUFFIX if lower_bound else key
+            self.store.put(target, kind, peak, lower_bound=lower_bound, record_id=record_id)
 
 
 class NullEstimator:

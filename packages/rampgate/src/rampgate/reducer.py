@@ -702,11 +702,13 @@ def _mark_stable(state: State, a: MarkStable) -> State:
 def _running_records(rt: JobRuntime, devices: Iterable[DeviceId]) -> list[HistoryRecord]:
     """Rule H: a STABLE job's observed peak, so siblings get an estimate before it finishes.
 
+    Not a lower bound: Rule S saw the ramp complete, so siblings may trust it (SPEC §5).
+
     Written again with the same ``record_id`` when the reservation grows; stores
     keep the per-dimension max of a record id.
     """
     return [
-        HistoryRecord(rt.id, d, rt.peak[d], True, rt.attempt, running=True)
+        HistoryRecord(rt.id, d, rt.peak[d], False, rt.attempt, running=True)
         for d in devices
         if d in rt.last_obs_t and not rt.peak[d].is_zero
     ]

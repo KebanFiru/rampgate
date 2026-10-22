@@ -72,6 +72,35 @@ def test_history_estimator_lower_bounds_raise_the_estimate() -> None:
     assert est.estimate(job("k"), A100) == EstimateResult(Resources(vram=30), 0)
 
 
+def test_lower_bounds_alone_are_not_trusted() -> None:
+    # An OOM'd job's lower bound must not let a same-template sibling skip probation.
+    est = HistoryEstimator(InMemoryHistoryStore())
+    est.record(job("k", "family"), A100, Resources(vram=15), lower_bound=True)
+    result = est.estimate(job("k", "family"), A100)
+    assert result == EstimateResult(Resources(vram=15), 0, complete=False)
+    assert result is not None
+    assert not result.trusted
+    est.record(job("family"), A100, Resources(vram=36))  # complete, at a fallback level only
+    assert est.estimate(job("k", "family"), A100) == EstimateResult(
+        Resources(vram=15), 0, complete=False
+    )
+    est.record(job("k"), A100, Resources(vram=10))  # a complete record at level 0
+    result = est.estimate(job("k", "family"), A100)
+    assert result == EstimateResult(Resources(vram=15), 0)  # max with the lower bound
+    assert result is not None
+    assert result.trusted
+
+
+def test_a_running_record_makes_siblings_trusted() -> None:
+    d = Driver().submit("j", fingerprint=("k",)).start().started().observe(1.0, vram=40).stable()
+    est = HistoryEstimator(InMemoryHistoryStore())
+    apply_history(est, d.state, d.state.history_records)
+    d.submit("sibling", fingerprint=("k",))
+    snap = resolve_estimates(d.state, est)
+    assert snap.estimates["sibling"][GPU] == Resources(vram=40)
+    assert snap.is_trusted(d.state.jobs["sibling"], GPU)
+
+
 def test_only_max_aggregate() -> None:
     with pytest.raises(ValueError, match="aggregate"):
         HistoryEstimator(InMemoryHistoryStore(), aggregate="p95")  # type: ignore[arg-type]
@@ -103,20 +132,21 @@ def test_apply_history_feeds_success_and_oom_records() -> None:
     assert history == (HistoryRecord("j", GPU, Resources(vram=40), True, 1),)
     apply_history(est, state, history)
     gpu = state.devices[GPU].device
-    assert est.estimate(state.jobs["j"].job, gpu) == EstimateResult(Resources(vram=40), 0)
+    lower = EstimateResult(Resources(vram=40), 0, complete=False)
+    assert est.estimate(state.jobs["j"].job, gpu) == lower
     apply_history(est, state, [HistoryRecord("ghost", GPU, Resources(vram=1), False, 1)])
 
 
 def test_rule_h_running_record_at_stable_and_rewritten_on_reservation_growth() -> None:
     d = Driver().to(JobState.WARMING).observe(1.0, vram=40).stable()
-    running = HistoryRecord("j", GPU, Resources(vram=40), True, 1, running=True)
+    running = HistoryRecord("j", GPU, Resources(vram=40), False, 1, running=True)
     assert d.state.history_records == (running,)
     assert running.record_id == f"j:1:{GPU}:running"
     d.observe(2.0, vram=45)  # within the 1.15 margin: no UpdateReservation, no record
     assert len(d.state.history_records) == 1
     d.observe(3.0, vram=60)  # exceeds the reservation
     grown = d.state.history_records[-1]
-    assert grown == HistoryRecord("j", GPU, Resources(vram=60), True, 1, running=True)
+    assert grown == HistoryRecord("j", GPU, Resources(vram=60), False, 1, running=True)
     assert grown.record_id == running.record_id
     store = InMemoryHistoryStore()
     est = HistoryEstimator(store)

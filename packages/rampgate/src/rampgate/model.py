@@ -147,7 +147,10 @@ class HistoryRecord:
 
     @property
     def kind(self) -> str:
-        """``peak`` (SUCCESS), ``lower_bound`` (OOM or stop) or ``running`` (STABLE, Rule H)."""
+        """``peak`` (SUCCESS), ``lower_bound`` (OOM or stop) or ``running`` (STABLE, Rule H).
+
+        Only ``lower_bound`` records have ``lower_bound=True``.
+        """
         if self.running:
             return "running"
         return "lower_bound" if self.lower_bound else "peak"
