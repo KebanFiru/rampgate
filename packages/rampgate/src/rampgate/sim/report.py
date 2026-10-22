@@ -3,9 +3,10 @@
 from __future__ import annotations
 
 import math
+from collections import Counter
 from collections.abc import Mapping, Sequence
 from dataclasses import dataclass
-from typing import Any
+from typing import Any, Literal
 
 from rampgate.actions import Start
 from rampgate.estimators import Estimator, HistoryEstimator, InMemoryHistoryStore, NullEstimator
@@ -30,8 +31,12 @@ class Report:
     - ``oom_count``, ``lost_work_step_s``, ``max_overcommit``: the executor's
       ground truth (`WorldStats`), the overcommit as the max over devices.
     - ``first_contact_ooms``: OOMs reported to the engine while their device
-      hosted a first-attempt job admitted there with an unknown estimate and
-      still STARTING/WARMING (SPEC §12 L4).
+      hosted a STARTING/WARMING first-attempt job that had no observation-based
+      estimate there: the estimator had no record at any fingerprint level when
+      it was admitted (SPEC §12 L4 and its clarification). Split into
+      ``first_contact_unknown`` (admitted with no estimate at all) and
+      ``first_contact_hint`` (admitted on its declared hint alone); when both
+      kinds ramp on the device, the OOM counts as ``unknown``.
     - ``utilization``: per device and dimension, mean job usage / capacity over
       the run (up to ``max_time`` when censored).
     - ``wait_p50`` / ``wait_p95``: queue wait, from a job's submission to its
@@ -44,6 +49,8 @@ class Report:
     total: int
     oom_count: int
     first_contact_ooms: int
+    first_contact_unknown: int
+    first_contact_hint: int
     lost_work_step_s: float
     utilization: Mapping[DeviceId, Mapping[str, float]]
     wait_p50: float
@@ -67,6 +74,8 @@ class Report:
             "total": self.total,
             "oom_count": self.oom_count,
             "first_contact_ooms": self.first_contact_ooms,
+            "first_contact_unknown": self.first_contact_unknown,
+            "first_contact_hint": self.first_contact_hint,
             "lost_work_step_s": self.lost_work_step_s,
             "utilization": self.mean_utilization,
             "wait_p50": finite(self.wait_p50),
@@ -101,21 +110,33 @@ def summarize(values: Sequence[float]) -> tuple[float, float, float]:
     return quantile(values, 0.25), quantile(values, 0.5), quantile(values, 0.75)
 
 
-def _first_contact(before: State, oom: JobExited) -> bool:
-    """SPEC §12 L4: an unknown first-attempt job is ramping on one of the OOM'd devices."""
+FirstContact = Literal["unknown", "hint"]
+
+
+def _first_contact(
+    before: State,
+    oom: JobExited,
+    answered: Mapping[tuple[JobId, int], frozenset[DeviceId]],
+) -> FirstContact | None:
+    """SPEC §12 L4 (clarified): a first-attempt job without an observation-based estimate
+    is ramping on one of the OOM'd devices. ``answered[(job, attempt)]``: devices where
+    the estimator had a record (at any fingerprint level) when that attempt started."""
     victim = before.jobs.get(oom.job_id)
     if victim is None:
-        return False
+        return None
+    found: set[FirstContact] = set()
     for d in victim.job.devices:
         for rt in before.jobs_on(d):
             if (
                 rt.attempt == 1
                 and rt.state in (JobState.STARTING, JobState.WARMING)
                 and d in rt.admitted_estimate
-                and rt.admitted_estimate[d] is None
+                and d not in answered.get((rt.id, rt.attempt), frozenset())
             ):
-                return True
-    return False
+                found.add("unknown" if rt.admitted_estimate[d] is None else "hint")
+    if "unknown" in found:
+        return "unknown"
+    return "hint" if found else None
 
 
 def report(trace: Trace, scenario: Scenario) -> Report:
@@ -128,12 +149,15 @@ def report(trace: Trace, scenario: Scenario) -> Report:
 
     submitted: dict[JobId, float] = {}
     started: dict[JobId, float] = {}
-    first_contact = 0
+    first_contact: Counter[FirstContact] = Counter()
+    answered: dict[tuple[JobId, int], frozenset[DeviceId]] = {}
     before = State.initial(scenario.devices)
     for tick in trace.ticks:
         for event in tick.events:
             if isinstance(event, JobExited) and event.kind is ExitKind.OOM:
-                first_contact += _first_contact(before, event)
+                kind = _first_contact(before, event, answered)
+                if kind is not None:
+                    first_contact[kind] += 1
         before = tick.after
         for event in tick.events:
             if isinstance(event, JobSubmitted):
@@ -141,6 +165,10 @@ def report(trace: Trace, scenario: Scenario) -> Report:
         for action in tick.decision.actions:
             if isinstance(action, Start):
                 started.setdefault(action.job_id, tick.now)
+                estimates = tick.snapshot.estimates.get(action.job_id, {})
+                answered[(action.job_id, action.attempt)] = frozenset(
+                    d for d, e in estimates.items() if e is not None
+                )
     final = trace.final.jobs
     waits = [
         started[j] - t if j in started else math.inf
@@ -162,7 +190,9 @@ def report(trace: Trace, scenario: Scenario) -> Report:
         completed=sum(1 for rt in final.values() if rt.state is JobState.SUCCEEDED),
         total=len(scenario.jobs),
         oom_count=world.oom_count,
-        first_contact_ooms=first_contact,
+        first_contact_ooms=first_contact.total(),
+        first_contact_unknown=first_contact["unknown"],
+        first_contact_hint=first_contact["hint"],
         lost_work_step_s=world.lost_work_step_s,
         utilization=utilization,
         wait_p50=quantile(waits, 0.5) if waits else 0.0,

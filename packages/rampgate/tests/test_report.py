@@ -21,6 +21,7 @@ from rampgate import (
     Resources,
     ResumeRequested,
     Start,
+    StaticEstimator,
 )
 from rampgate.sim import (
     PROBATION_COLD,
@@ -234,3 +235,30 @@ def test_first_contact_ooms_are_counted_separately() -> None:
     assert rep.oom_count >= 1
     assert rep.first_contact_ooms == 1  # later attempts are no longer first contact
     assert rep.metrics()["first_contact_ooms"] == 1
+    assert (rep.first_contact_unknown, rep.first_contact_hint) == (1, 0)
+
+
+def _beside_a_stable_job(hint: Resources | None) -> Scenario:
+    known = SimJob(Job("known", {GPU.id: Resources(vram=60)}), flat(60, duration=300))
+    under = SimJob(
+        Job("under", {GPU.id: hint}, fingerprint=("tmpl:x", "tmpl")),
+        flat(50, duration=100),
+        submit_at=60,
+    )
+    return Scenario((GPU,), (known, under))
+
+
+def test_an_under_declared_hint_is_first_contact_of_its_own_kind() -> None:
+    scenario = _beside_a_stable_job(Resources(vram=10))
+    rep = report(simulate(scenario, FifoPolicy(), config=FAST), scenario)
+    assert rep.oom_count >= 1
+    assert (rep.first_contact_unknown, rep.first_contact_hint) == (0, 1)
+    assert rep.first_contact_ooms == 1
+
+
+def test_an_estimate_from_a_fallback_history_level_is_not_first_contact() -> None:
+    scenario = _beside_a_stable_job(None)
+    estimator = StaticEstimator({"under": {GPU.id: Resources(vram=10)}}, level=1)
+    rep = report(simulate(scenario, FifoPolicy(), config=FAST, estimator=estimator), scenario)
+    assert rep.oom_count >= 1
+    assert rep.first_contact_ooms == 0

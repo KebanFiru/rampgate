@@ -47,6 +47,8 @@ METRICS = (
     "completed",
     "oom_count",
     "first_contact_ooms",
+    "first_contact_unknown",
+    "first_contact_hint",
     "lost_work_step_s",
     "utilization",
     "wait_p50",
@@ -133,6 +135,11 @@ def median(runs: Sequence[dict[str, Any]], metric: str) -> float:
 # -- acceptance (SPEC §12 L4) ------------------------------------------------------------------
 
 
+def rampgate_row(strategy: str) -> bool:
+    """Full rampgate (Rules P, A, O, H; cold or warm), not an ablation or a baseline."""
+    return strategy.startswith("Probation")
+
+
 def check(runs: list[dict[str, Any]], min_seeds: int) -> tuple[list[str], list[str]]:
     """Returns (failures, notes). Failures break the build; notes report the target."""
     failures: list[str] = []
@@ -141,6 +148,14 @@ def check(runs: list[dict[str, Any]], min_seeds: int) -> tuple[list[str], list[s
     seeds = {len(v) for v in main.values()}
     if seeds and min(seeds) < min_seeds:
         failures.append(f"only {min(seeds)} seeds per row, need >= {min_seeds}")
+    # Every OOM of a rampgate row that is not first-contact is a bug.
+    for r in runs:
+        if r["group"] not in ("main", "warm") or not rampgate_row(r["strategy"]):
+            continue
+        where = f"{r['scenario']} {r['strategy']} seed {r['seed']}"
+        other = r["oom_count"] - r["first_contact_ooms"]
+        if other:
+            failures.append(f"{where}: {other} OOM(s) not first-contact")
     for scenario in ("a_small", "b_mixed", "c_late_spike"):
         rows = main.get((scenario, "Probation"), [])
         greedy = {r["seed"]: r["oom_count"] for r in main.get((scenario, "GreedyFree"), [])}
@@ -148,9 +163,6 @@ def check(runs: list[dict[str, Any]], min_seeds: int) -> tuple[list[str], list[s
             r["seed"]: r["oom_count"] for r in main.get((scenario, "DeclaredReservation"), [])
         }
         for r in rows:
-            other = r["oom_count"] - r["first_contact_ooms"]
-            if other:
-                failures.append(f"{scenario} seed {r['seed']}: {other} OOM(s) not first-contact")
             fc = r["first_contact_ooms"]
             for name, baseline in (("GreedyFree", greedy), ("DeclaredReservation", declared)):
                 if fc and not fc < baseline.get(r["seed"], 0):
@@ -252,9 +264,10 @@ def table(runs: list[dict[str, Any]], group: str, order: Sequence[str]) -> list[
         lines += [
             f"#### {scenario}",
             "",
-            "| Strategy | Makespan (s) | Completed | OOMs | First-contact OOMs | Lost work (step-s)"
-            " | Utilization | Wait p50 (s) | Wait p95 (s) |",
-            "|---|---|---|---|---|---|---|---|---|",
+            "| Strategy | Makespan (s) | Completed | OOMs | First-contact: unknown"
+            " | First-contact: under-declared hint"
+            " | Lost work (step-s) | Utilization | Wait p50 (s) | Wait p95 (s) |",
+            "|---|---|---|---|---|---|---|---|---|---|",
         ]
         for name in order:
             rs = rows.get((scenario, name))
@@ -263,7 +276,8 @@ def table(runs: list[dict[str, Any]], group: str, order: Sequence[str]) -> list[
             total = rs[0]["total"]
             lines.append(
                 f"| {name} | {cell(rs, 'makespan')} | {cell(rs, 'completed')} / {total}"
-                f" | {cell(rs, 'oom_count')} | {cell(rs, 'first_contact_ooms')}"
+                f" | {cell(rs, 'oom_count')} | {cell(rs, 'first_contact_unknown')}"
+                f" | {cell(rs, 'first_contact_hint')}"
                 f" | {cell(rs, 'lost_work_step_s')} | {cell(rs, 'utilization', 2)}"
                 f" | {cell(rs, 'wait_p50')} | {cell(rs, 'wait_p95')} |"
             )
