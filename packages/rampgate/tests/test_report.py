@@ -87,7 +87,7 @@ def test_oom_lost_work_is_the_rollback_to_the_last_checkpoint() -> None:
     assert stats.max_overcommit[GPU.id] == pytest.approx(1.0)  # 200 on 100
     assert stats.timeline == (
         TimelineEntry(1.0, "a", 1, "start"),
-        TimelineEntry(26.0, "a", 1, "OOM"),
+        TimelineEntry(26.0, "a", 1, "OOM", GPU.id),
     )
 
 
@@ -262,3 +262,13 @@ def test_an_estimate_from_a_fallback_history_level_is_not_first_contact() -> Non
     rep = report(simulate(scenario, FifoPolicy(), config=FAST, estimator=estimator), scenario)
     assert rep.oom_count >= 1
     assert rep.first_contact_ooms == 0
+
+
+def test_ooms_per_job_and_repeat_ooms_on_a_device() -> None:
+    scenario = _beside_a_stable_job(None)
+    greedy = STRATEGIES["GreedyFree"]
+    rep = run(scenario, greedy, policy=FifoPolicy(), max_time=400)
+    assert rep.max_job_ooms >= 2  # GreedyFree never learns: "under" OOMs again and again
+    assert rep.repeat_device_ooms == 1
+    assert rep.ooms_per_job[0] == 1  # "known" never OOMs
+    assert rep.metrics()["ooms_per_job"]["0"] == 1

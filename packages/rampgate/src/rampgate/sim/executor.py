@@ -21,12 +21,16 @@ ForeignLoad = Resources | Sequence[tuple[float, Resources]]
 
 @dataclass(frozen=True, slots=True)
 class TimelineEntry:
-    """A process began (``kind="start"``) or exited (``kind`` = the ``ExitKind`` value)."""
+    """A process began (``kind="start"``) or exited (``kind`` = the ``ExitKind`` value).
+
+    ``device`` is the device whose overcommit caused an OOM kill (None otherwise).
+    """
 
     t: float
     job_id: JobId
     attempt: int
     kind: str
+    device: DeviceId | None = None
 
 
 @dataclass(frozen=True, slots=True)
@@ -177,7 +181,9 @@ class SimExecutor:
         kept: float,
         kind: ExitKind,
         now: float,
+        *,
         oom_dims: tuple[str, ...] | None = None,
+        device: DeviceId | None = None,
     ) -> Event:
         job_id = proc.job.id
         self.progress[job_id] = self.progress.get(job_id, 0.0) + kept
@@ -187,7 +193,7 @@ class SimExecutor:
         del self.procs[job_id]
         exit_event = JobExited(job_id, proc.attempt, kind, now, oom_dims)
         self.exits[(job_id, proc.attempt)] = exit_event
-        self.timeline.append(TimelineEntry(now, job_id, proc.attempt, kind.value))
+        self.timeline.append(TimelineEntry(now, job_id, proc.attempt, kind.value, device))
         if kind is ExitKind.OOM:
             self.oom_count += 1
         return exit_event
@@ -282,7 +288,9 @@ class SimExecutor:
                 elapsed = now - victim.began
                 ckpt = self.workloads[victim.job.id].checkpoint_every_s
                 kept = math.floor(elapsed / ckpt) * ckpt if ckpt > 0 else 0.0
-                events.append(self._end(victim, kept, ExitKind.OOM, now, oom_dims=tuple(over)))
+                events.append(
+                    self._end(victim, kept, ExitKind.OOM, now, oom_dims=tuple(over), device=d)
+                )
         return events
 
 

@@ -42,7 +42,7 @@ def test_one_seed_run_writes_results_and_passes_the_check(bench: Any, tmp_path: 
 
 
 def _row(scenario: str, strategy: str, seed: int, **metrics: Any) -> dict[str, Any]:
-    base = {"oom_count": 0, "first_contact_ooms": 0, "makespan": 100.0}
+    base = {"oom_count": 0, "first_contact_ooms": 0, "repeat_device_ooms": 0, "makespan": 100.0}
     keys = {"group": "main", "scenario": scenario, "strategy": strategy, "seed": seed}
     return keys | base | metrics
 
@@ -64,11 +64,11 @@ def test_check_flags_non_first_contact_ooms_and_weak_baselines(bench: Any) -> No
 def test_check_gates_every_rampgate_row_but_not_ablations(bench: Any) -> None:
     runs = [
         _row("d_under_declared", "Probation", 0, oom_count=2, first_contact_ooms=1),
-        _row("e_trainq", "Probation (warm)", 0, oom_count=1) | {"group": "warm"},
+        _row("e_trainq", "Probation (warm)", 0, repeat_device_ooms=1) | {"group": "warm"},
         _row("a_small", "rampgate - Rule P", 0, oom_count=9) | {"group": "ablations"},
     ]
     failures, _ = bench.check(runs, min_seeds=1)
     assert failures == [
         "d_under_declared Probation seed 0: 1 OOM(s) not first-contact",
-        "e_trainq Probation (warm) seed 0: 1 OOM(s) not first-contact",
+        "e_trainq Probation (warm) seed 0: 1 job(s) OOMed twice on a device",
     ]

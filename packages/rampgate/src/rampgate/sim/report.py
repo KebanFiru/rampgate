@@ -37,6 +37,10 @@ class Report:
       ``first_contact_unknown`` (admitted with no estimate at all) and
       ``first_contact_hint`` (admitted on its declared hint alone); when both
       kinds ramp on the device, the OOM counts as ``unknown``.
+    - ``ooms_per_job``: number of OOM kills -> number of jobs with that many
+      (jobs that never OOMed are under 0); ``max_job_ooms`` is its largest key.
+    - ``repeat_device_ooms``: (job, device) pairs with 2 or more OOM kills on
+      that device, from the executor's ground truth.
     - ``utilization``: per device and dimension, mean job usage / capacity over
       the run (up to ``max_time`` when censored).
     - ``wait_p50`` / ``wait_p95``: queue wait, from a job's submission to its
@@ -51,6 +55,8 @@ class Report:
     first_contact_ooms: int
     first_contact_unknown: int
     first_contact_hint: int
+    ooms_per_job: Mapping[int, int]
+    repeat_device_ooms: int
     lost_work_step_s: float
     utilization: Mapping[DeviceId, Mapping[str, float]]
     wait_p50: float
@@ -76,12 +82,19 @@ class Report:
             "first_contact_ooms": self.first_contact_ooms,
             "first_contact_unknown": self.first_contact_unknown,
             "first_contact_hint": self.first_contact_hint,
+            "max_job_ooms": self.max_job_ooms,
+            "ooms_per_job": {str(k): v for k, v in sorted(self.ooms_per_job.items())},
+            "repeat_device_ooms": self.repeat_device_ooms,
             "lost_work_step_s": self.lost_work_step_s,
             "utilization": self.mean_utilization,
             "wait_p50": finite(self.wait_p50),
             "wait_p95": finite(self.wait_p95),
             "max_overcommit": self.max_overcommit,
         }
+
+    @property
+    def max_job_ooms(self) -> int:
+        return max(self.ooms_per_job, default=0)
 
     @property
     def mean_utilization(self) -> float:
@@ -169,6 +182,9 @@ def report(trace: Trace, scenario: Scenario) -> Report:
                 answered[(action.job_id, action.attempt)] = frozenset(
                     d for d, e in estimates.items() if e is not None
                 )
+    kills = Counter((e.job_id, e.device) for e in world.timeline if e.kind == ExitKind.OOM.value)
+    per_job = Counter(job for job, _ in kills.elements())
+    ooms_per_job = Counter(per_job[sj.job.id] for sj in scenario.jobs)
     final = trace.final.jobs
     waits = [
         started[j] - t if j in started else math.inf
@@ -193,6 +209,8 @@ def report(trace: Trace, scenario: Scenario) -> Report:
         first_contact_ooms=first_contact.total(),
         first_contact_unknown=first_contact["unknown"],
         first_contact_hint=first_contact["hint"],
+        ooms_per_job=dict(ooms_per_job),
+        repeat_device_ooms=sum(1 for n in kills.values() if n >= 2),
         lost_work_step_s=world.lost_work_step_s,
         utilization=utilization,
         wait_p50=quantile(waits, 0.5) if waits else 0.0,

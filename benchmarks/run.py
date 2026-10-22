@@ -49,6 +49,8 @@ METRICS = (
     "first_contact_ooms",
     "first_contact_unknown",
     "first_contact_hint",
+    "max_job_ooms",
+    "repeat_device_ooms",
     "lost_work_step_s",
     "utilization",
     "wait_p50",
@@ -148,7 +150,8 @@ def check(runs: list[dict[str, Any]], min_seeds: int) -> tuple[list[str], list[s
     seeds = {len(v) for v in main.values()}
     if seeds and min(seeds) < min_seeds:
         failures.append(f"only {min(seeds)} seeds per row, need >= {min_seeds}")
-    # Every OOM of a rampgate row that is not first-contact is a bug.
+    # Every OOM of a rampgate row that is not first-contact is a bug, and no job OOMs
+    # twice on the same device (Rule O reaches a sufficient estimate in one step).
     for r in runs:
         if r["group"] not in ("main", "warm") or not rampgate_row(r["strategy"]):
             continue
@@ -156,6 +159,8 @@ def check(runs: list[dict[str, Any]], min_seeds: int) -> tuple[list[str], list[s
         other = r["oom_count"] - r["first_contact_ooms"]
         if other:
             failures.append(f"{where}: {other} OOM(s) not first-contact")
+        if r["repeat_device_ooms"]:
+            failures.append(f"{where}: {r['repeat_device_ooms']} job(s) OOMed twice on a device")
     for scenario in ("a_small", "b_mixed", "c_late_spike"):
         rows = main.get((scenario, "Probation"), [])
         greedy = {r["seed"]: r["oom_count"] for r in main.get((scenario, "GreedyFree"), [])}
@@ -265,9 +270,9 @@ def table(runs: list[dict[str, Any]], group: str, order: Sequence[str]) -> list[
             f"#### {scenario}",
             "",
             "| Strategy | Makespan (s) | Completed | OOMs | First-contact: unknown"
-            " | First-contact: under-declared hint"
+            " | First-contact: under-declared hint | Max OOMs / job | Repeat-device OOMs"
             " | Lost work (step-s) | Utilization | Wait p50 (s) | Wait p95 (s) |",
-            "|---|---|---|---|---|---|---|---|---|---|",
+            "|---|---|---|---|---|---|---|---|---|---|---|---|",
         ]
         for name in order:
             rs = rows.get((scenario, name))
@@ -277,12 +282,33 @@ def table(runs: list[dict[str, Any]], group: str, order: Sequence[str]) -> list[
             lines.append(
                 f"| {name} | {cell(rs, 'makespan')} | {cell(rs, 'completed')} / {total}"
                 f" | {cell(rs, 'oom_count')} | {cell(rs, 'first_contact_unknown')}"
-                f" | {cell(rs, 'first_contact_hint')}"
+                f" | {cell(rs, 'first_contact_hint')} | {cell(rs, 'max_job_ooms')}"
+                f" | {cell(rs, 'repeat_device_ooms')}"
                 f" | {cell(rs, 'lost_work_step_s')} | {cell(rs, 'utilization', 2)}"
                 f" | {cell(rs, 'wait_p50')} | {cell(rs, 'wait_p95')} |"
             )
         lines.append("")
     return lines
+
+
+def ooms_per_job_table(runs: list[dict[str, Any]], groups: Sequence[str]) -> list[str]:
+    """Per scenario and strategy: OOM kills per job -> jobs, summed over the seeds."""
+    rows = by((r for r in runs if r["group"] in groups), "scenario", "strategy")
+    lines = [
+        "Jobs by their number of OOM kills, summed over all seeds (`k: jobs`; jobs that"
+        " never OOMed are left out).",
+        "",
+        "| Scenario | Strategy | OOMs per job |",
+        "|---|---|---|",
+    ]
+    for (scenario, name), rs in sorted(rows.items()):
+        total: dict[int, int] = defaultdict(int)
+        for r in rs:
+            for k, n in r["ooms_per_job"].items():
+                total[int(k)] += n
+        hist = ", ".join(f"{k}: {total[k]}" for k in sorted(total) if k > 0) or "none"
+        lines.append(f"| {scenario} | {name} | {hist} |")
+    return [*lines, ""]
 
 
 def sensitivity_table(runs: list[dict[str, Any]]) -> list[str]:
@@ -342,6 +368,7 @@ def results_md(data: dict[str, Any], failures: list[str], notes: list[str]) -> s
         order = [MAIN[0].name, WARM[0].name, MAIN[1].name, WARM[1].name]
         merged = runs + [{**r, "group": "warm"} for r in runs if r["group"] == "main"]
         lines += ["## Cold vs warm history", "", *table(merged, "warm", order)]
+    lines += ["## OOMs per job", "", *ooms_per_job_table(runs, ("main", "warm"))]
     if "sensitivity" in meta["groups"]:
         lines += ["## Sensitivity", "", *sensitivity_table(runs)]
     lines += ["## Acceptance (SPEC §12 L4)", ""]
