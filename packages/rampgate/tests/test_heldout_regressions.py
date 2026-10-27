@@ -50,3 +50,17 @@ def test_freeze_1_held_out_failure_has_no_oom_outside_first_contact(
     assert rep.repeat_device_ooms == 0
     assert not rep.censored
     sys.modules.pop("scenarios", None)
+
+
+@pytest.mark.parametrize(
+    ("scenario", "seed"),
+    [
+        ("b_mixed", 36),  # D1: an unknown job overloaded the device once STABLE (Rule V)
+        ("d_under_declared", 36),  # D1, with hints
+        ("b_mixed", 19),  # D2: a mid-ramp OOM's retry was admitted on a weak bound (isolation)
+    ],
+)
+def test_development_seed_failure_before_freeze_2_has_no_oom_outside_first_contact(
+    scenario: str, seed: int, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    test_freeze_1_held_out_failure_has_no_oom_outside_first_contact(scenario, seed, monkeypatch)
