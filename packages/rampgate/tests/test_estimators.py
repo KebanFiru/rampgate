@@ -79,7 +79,7 @@ def test_history_estimator_lower_bounds_raise_the_estimate() -> None:
     est.record(job("k"), A100, Resources(vram=30), lower_bound=True)
     # Newer than the success and above it: counted, but "more than 30" is not trusted.
     assert est.estimate(job("k"), A100) == EstimateResult(
-        Resources(vram=30), 0, complete=False, observations=1
+        Resources(vram=30), 0, complete=False, observations=1, lower_bound_dims=frozenset({"vram"})
     )
 
 
@@ -88,12 +88,14 @@ def test_lower_bounds_alone_are_not_trusted() -> None:
     est = HistoryEstimator(InMemoryHistoryStore())
     est.record(job("k", "family"), A100, Resources(vram=15), lower_bound=True)
     result = est.estimate(job("k", "family"), A100)
-    assert result == EstimateResult(Resources(vram=15), 0, complete=False, lower_bound_only=True)
+    assert result == EstimateResult(
+        Resources(vram=15), 0, complete=False, lower_bound_dims=frozenset({"vram"})
+    )
     assert result is not None
     assert not result.trusted
     est.record(job("family"), A100, Resources(vram=36))  # complete, at a fallback level only
     assert est.estimate(job("k", "family"), A100) == EstimateResult(
-        Resources(vram=15), 0, complete=False, lower_bound_only=True
+        Resources(vram=15), 0, complete=False, lower_bound_dims=frozenset({"vram"})
     )
     est.record(job("k"), A100, Resources(vram=10))  # a complete record at level 0, newer
     result = est.estimate(job("k", "family"), A100)
@@ -138,14 +140,22 @@ def test_a_lower_bound_only_estimate_grows_like_rule_o_for_siblings() -> None:
     assert resolve_estimates(d.state, big).estimates["sibling"][GPU] == Resources(vram=100)
 
 
-def test_a_newer_lower_bound_above_a_complete_record_is_not_grown() -> None:
-    # Only a key with *no* complete record is lower-bound-only (SPEC §5, wording of the change).
+def test_a_newer_lower_bound_above_a_complete_record_grows_in_its_dimensions_only() -> None:
+    # SPEC §5 (scope widened): a newer lower bound above the complete value is "more than X"
+    # too. vram comes from the lower bound (40 > 36) and grows; ram comes from the complete
+    # record (8 > 2) and does not.
     est = HistoryEstimator(InMemoryHistoryStore())
     d = Driver().submit("sibling", fingerprint=("k",))
     j, gpu = d.state.jobs["sibling"].job, d.state.devices[GPU].device
-    est.record(j, gpu, Resources(vram=36), record_id="x:1:d:peak")
-    est.record(j, gpu, Resources(vram=40), lower_bound=True, record_id="y:1:d:lower_bound")
-    assert resolve_estimates(d.state, est).estimates["sibling"][GPU] == Resources(vram=40)
+    est.record(j, gpu, Resources(vram=36, ram=8), record_id="x:1:d:peak")
+    est.record(j, gpu, Resources(vram=40, ram=2), lower_bound=True, record_id="y:1:d:lower_bound")
+    result = est.estimate(j, gpu)
+    assert result is not None
+    assert result.lower_bound_dims == {"vram"}
+    assert not result.trusted
+    snap = resolve_estimates(d.state, est, Config(oom_growth=1.25))
+    assert snap.estimates["sibling"][GPU] == Resources(vram=50, ram=8)
+    assert not snap.is_trusted(d.state.jobs["sibling"], GPU)
 
 
 def test_an_older_lower_bound_does_not_override_a_later_success() -> None:
@@ -160,7 +170,9 @@ def test_a_newer_lower_bound_above_the_complete_value_counts_and_is_untrusted() 
     est.record(job("k"), A100, Resources(vram=36), record_id="x:1:d:peak")
     est.record(job("k"), A100, Resources(vram=40), lower_bound=True, record_id="y:1:d:lower_bound")
     result = est.estimate(job("k"), A100)
-    assert result == EstimateResult(Resources(vram=40), 0, complete=False, observations=1)
+    assert result == EstimateResult(
+        Resources(vram=40), 0, complete=False, observations=1, lower_bound_dims=frozenset({"vram"})
+    )
     est.record(job("k"), A100, Resources(vram=30), record_id="z:1:d:peak")  # a later success
     assert est.estimate(job("k"), A100) == EstimateResult(Resources(vram=36), 0, observations=2)
 
@@ -258,7 +270,9 @@ def test_apply_history_feeds_success_and_oom_records() -> None:
     assert history == (HistoryRecord("j", GPU, Resources(vram=40), True, 1),)
     apply_history(est, state, history)
     gpu = state.devices[GPU].device
-    lower = EstimateResult(Resources(vram=40), 0, complete=False, lower_bound_only=True)
+    lower = EstimateResult(
+        Resources(vram=40), 0, complete=False, lower_bound_dims=frozenset({"vram"})
+    )
     assert est.estimate(state.jobs["j"].job, gpu) == lower
     apply_history(est, state, [HistoryRecord("ghost", GPU, Resources(vram=1), False, 1)])
 

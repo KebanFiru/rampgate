@@ -43,8 +43,9 @@ class EstimateResult:
     ``complete``: the value includes a full observation of a ramp (a ``peak`` or
     ``running`` record), not only lower bounds from OOMs or stops. Only a complete
     level-0 estimate is *trusted* and lets a job skip probation (SPEC §5).
-    ``lower_bound_only``: the key holds only lower bounds (no complete record), so the
-    job needs *more* than ``value``; `resolve_estimates` grows it like Rule O (SPEC §5).
+    ``lower_bound_dims``: the dimensions whose value is a lower bound (no complete record,
+    or a newer lower bound above it), where the job needs *more* than ``value``;
+    `resolve_estimates` grows them like Rule O (SPEC §5).
     """
 
     value: Resources
@@ -52,7 +53,7 @@ class EstimateResult:
     complete: bool = True
     # Complete observations behind the value (rule A, SPEC §5); 0 = unknown, the safe side.
     observations: int = 0
-    lower_bound_only: bool = False
+    lower_bound_dims: frozenset[str] = frozenset()
 
     @property
     def trusted(self) -> bool:
@@ -270,15 +271,19 @@ class HistoryEstimator:
             entry = self.store.get(key, kind)
             if entry is None:
                 continue
-            complete = entry.complete is not None and (
-                entry.lower_bound is None or not entry.lower_bound.exceeds(entry.complete)
-            )
+            above: list[str] = []
+            if entry.lower_bound is not None:
+                above = (
+                    list(entry.lower_bound)
+                    if entry.complete is None
+                    else entry.lower_bound.exceeds(entry.complete)
+                )
             return EstimateResult(
                 entry.value,
                 level,
-                complete=complete,
+                complete=entry.complete is not None and not above,
                 observations=entry.observation_count,
-                lower_bound_only=entry.complete is None,
+                lower_bound_dims=frozenset(above),
             )
         return None
 
@@ -349,8 +354,9 @@ class StaticEstimator:
 def resolve_estimates(state: State, estimator: Estimator, config: Config | None = None) -> Snapshot:
     """Ask the estimator about every unfinished job, so ``decide`` can stay pure.
 
-    A lower-bound-only answer becomes ``min(value * oom_growth, capacity)`` per dimension
-    (never below the value), the step Rule O gives the OOM'd job itself (SPEC §5).
+    In the dimensions where the answer is a lower bound, it becomes
+    ``min(value * oom_growth, capacity)`` (never below the value), the step Rule O gives
+    the OOM'd job itself (SPEC §5).
     """
     growth = (config or Config()).oom_growth
     estimates: dict[JobId, Mapping[DeviceId, Resources | None]] = {}
@@ -364,8 +370,10 @@ def resolve_estimates(state: State, estimator: Estimator, config: Config | None 
             result = estimator.estimate(rt.job, state.devices[d].device)
             if isinstance(result, EstimateResult):
                 per_device[d] = result.value
-                if result.lower_bound_only:
-                    per_device[d] = _grow(result.value, state.devices[d].capacity, growth)
+                if result.lower_bound_dims:
+                    per_device[d] = _grow(
+                        result.value, result.lower_bound_dims, state.devices[d].capacity, growth
+                    )
                 if result.trusted:
                     trusted.add((rt.id, d))
                     observations[(rt.id, d)] = result.observations
@@ -375,15 +383,16 @@ def resolve_estimates(state: State, estimator: Estimator, config: Config | None 
     return Snapshot(state, frozen_map(estimates), frozenset(trusted), frozen_map(observations))
 
 
-def _grow(lower: Resources, capacity: Resources, growth: float) -> Resources:
-    """Rule O's step for a lower bound: ``lower * growth``, capped at capacity where it is
-    positive, never below ``lower``."""
-    return Resources(
-        {
-            dim: max(v, min(v * growth, capacity[dim]) if capacity[dim] > 0 else v * growth)
-            for dim, v in lower.items()
-        }
-    )
+def _grow(value: Resources, dims: frozenset[str], capacity: Resources, growth: float) -> Resources:
+    """Rule O's step for the lower-bound ``dims`` of ``value``: ``v * growth``, capped at
+    capacity where it is positive, never below ``v``. Other dimensions are kept."""
+
+    def grown(dim: str, v: float) -> float:
+        if dim not in dims:
+            return v
+        return max(v, min(v * growth, capacity[dim]) if capacity[dim] > 0 else v * growth)
+
+    return Resources({dim: grown(dim, v) for dim, v in value.items()})
 
 
 def apply_history(estimator: Estimator, state: State, records: Iterable[HistoryRecord]) -> None:

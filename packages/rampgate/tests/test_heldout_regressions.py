@@ -2,7 +2,7 @@
 
 Each (scenario, seed) had cold `Probation` OOM outside first contact on tag
 ``bench-freeze-1``; the traces are in ``docs/benchmark/freeze-1/heldout-failures.md``.
-(b) 1002 and 1008: a sibling admitted on a lower bound alone (lower-bound-only
+(b) 1002 and 1008: a sibling admitted on a lower bound alone (lower-bound
 estimates now grow by ``oom_growth``). (c) 1005, 1009, 1013, 1016: trusted jobs
 started next to an unknown warming job (I17). These seeds are spent: they are
 replayed here, never re-reported as held-out results.
