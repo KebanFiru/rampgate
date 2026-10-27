@@ -505,16 +505,33 @@ def trusted_snapshot(d: Driver, job: str, vram: float, observations: int = 3) ->
 
 
 def test_trusted_job_skips_probation_and_counts_estimate_times_trusted_margin() -> None:
-    d = Driver().to(JobState.WARMING, "a").observe(1.0, "a", vram=10).submit("b")
+    d = Driver().submit("b")
     dec = decide(trusted_snapshot(d, "b", 20), 2.0, d.config, FifoPolicy(strict=False))
     (start,) = [a for a in dec.actions if isinstance(a, Start)]
     assert (start.job_id, start.trusted) == ("b", frozenset({GPU}))
     apply(d, dec)
     loads = device_loads(d.state, 2.0, d.config)
-    assert loads[GPU].warming_job == "a"  # b does not take the probation slot
-    assert loads[GPU].warming_usage == Resources(vram=10) + Resources(vram=20).scale(1.05)
+    assert loads[GPU].warming_job is None  # b does not take the probation slot
+    assert loads[GPU].warming_usage == Resources(vram=20).scale(1.05)
     d.started("b", t=2.0).observe(3.0, "b", vram=30)  # usage above E * margin wins
-    assert device_loads(d.state, 3.0, d.config)[GPU].warming_usage == Resources(vram=40)
+    assert device_loads(d.state, 3.0, d.config)[GPU].warming_usage == Resources(vram=30)
+
+
+def test_trusted_job_waits_while_an_untrusted_job_warms_on_its_device() -> None:
+    # SPEC §5 (after held-out evaluation 1), I17: a's peak is unknown, so it gets everything
+    # currently free until it is stable; a trusted job does not start next to it.
+    d = Driver().to(JobState.WARMING, "a").observe(1.0, "a", vram=10).submit("b")
+    dec = decide(trusted_snapshot(d, "b", 20), 2.0, d.config, FifoPolicy(strict=False))
+    assert starts(dec) == []
+    assert dec.explanations["b"] == WaitingForWarmup(GPU, "a")
+
+
+def test_trusted_job_waits_for_an_untrusted_job_started_in_the_same_tick() -> None:
+    # The held-out (c) failures: an unknown job and trusted ones admitted in one tick.
+    d = Driver().submit("a").submit("b")
+    dec = decide(trusted_snapshot(d, "b", 20), 0.0, d.config, FifoPolicy(strict=False))
+    assert starts(dec) == ["a"]
+    assert dec.explanations["b"] == WaitingForWarmup(GPU, "a")
 
 
 def test_trusted_margin_is_separate_from_safety_margin() -> None:

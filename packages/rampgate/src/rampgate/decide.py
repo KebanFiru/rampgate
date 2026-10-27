@@ -375,9 +375,9 @@ def _admit(tick: _Tick, policy: OrderingPolicy, admission: Admission) -> None:
             for d in devices
             if trust_mode and estimates[d] is not None and tick.snapshot.is_trusted(rt, d)
         )
-        probation = (
-            [d for d in devices if d in warming and d not in trusted] if admission.probation else []
-        )
+        # An untrusted warming job holds its device against every start, trusted ones too:
+        # its peak is unknown, so it gets everything currently free (SPEC §5, I17).
+        probation = [d for d in devices if d in warming] if admission.probation else []
         no_fit = [
             d
             for d in devices

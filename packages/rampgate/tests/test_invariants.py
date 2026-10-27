@@ -1,6 +1,6 @@
 """SPEC §10 invariants under hypothesis-generated scenarios run through the simulator.
 
-Checked here: I1-I7, I9, I10, I13, I15 (per tick), I11 (fact-event replay) and
+Checked here: I1-I7, I9, I10, I13, I15, I17 (per tick), I11 (fact-event replay) and
 I11b (command idempotence). I12 is checked by the reducer state machine
 (the simulator never produces LOST); I14 by ``test_sim``; I8 belongs to L3.
 """
@@ -192,7 +192,7 @@ def check_i1(state: State, cfg: Config = CFG) -> None:
 def check_starts(
     tick: Tick, policy: OrderingPolicy, cfg: Config = CFG, *, history: bool = False
 ) -> None:
-    """I2, I3, I9, I10 (resume flag) and I15, replaying the decision on its snapshot.
+    """I2, I3, I9, I10 (resume flag), I15 and I17, replaying the decision on its snapshot.
 
     ``history``: the run used a `HistoryEstimator`, so a sibling of a STABLE job
     (shared fingerprint key, same device) must start with an estimate (Rule H + P).
@@ -223,6 +223,12 @@ def check_starts(
                             rt.id,
                             o.id,
                         )
+            for d in action.placement:  # I17: an untrusted warming job holds d against any start
+                for o in work.jobs_on(d):
+                    holds = o.state in (JobState.STARTING, JobState.WARMING) or (
+                        o.state is JobState.STABLE and o.stable_at == tick.now
+                    )
+                    assert not (holds and d not in o.trusted), (rt.id, o.id, d)
             for d in action.placement:  # I2 (unknown estimates are checked with unknown_min_free)
                 estimate = tick.snapshot.estimate(rt, d)
                 if rt.job.force:
