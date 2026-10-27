@@ -1,8 +1,8 @@
 """Run the benchmark (SPEC §8) and write ``results.json`` and ``results.md``.
 
-    uv run python benchmarks/run.py                      # full run, 10 seeds
+    uv run python benchmarks/run.py                      # full run, development seeds 0-49
     uv run python benchmarks/run.py --check --no-plots   # also enforce SPEC §12 L4
-    uv run --group bench python benchmarks/run.py        # with plots (matplotlib)
+    uv run python benchmarks/run.py --no-plots           # without plots (matplotlib, `bench` group)
 
 Groups of runs:
 
@@ -441,12 +441,14 @@ def results_md(data: dict[str, Any], failures: list[str], notes: list[str]) -> s
 
 def main(argv: Sequence[str] | None = None) -> int:
     parser = argparse.ArgumentParser(description=__doc__.splitlines()[0])
-    parser.add_argument("--seeds", type=int, default=10, help="number of seeds")
+    parser.add_argument(
+        "--seeds", type=int, default=50, help="number of seeds (development: 0-49, SPEC §12)"
+    )
     parser.add_argument(
         "--seed-start",
         type=int,
         default=0,
-        help="first seed: 0 = development seeds 0-9, 1000 = held-out seeds (SPEC §12)",
+        help="first seed: 0 = development seeds, 1000*N = held-out set of freeze N (SPEC §12)",
     )
     parser.add_argument(
         "--commit", help="commit to record in results.json (when git is not available)"
