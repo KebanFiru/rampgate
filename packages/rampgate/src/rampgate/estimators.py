@@ -6,6 +6,7 @@ from collections.abc import Callable, Iterable, Mapping
 from dataclasses import dataclass
 from typing import Any, Literal, Protocol
 
+from rampgate.config import Config
 from rampgate.model import (
     TERMINAL_STATES,
     Device,
@@ -42,6 +43,8 @@ class EstimateResult:
     ``complete``: the value includes a full observation of a ramp (a ``peak`` or
     ``running`` record), not only lower bounds from OOMs or stops. Only a complete
     level-0 estimate is *trusted* and lets a job skip probation (SPEC §5).
+    ``lower_bound_only``: the key holds only lower bounds (no complete record), so the
+    job needs *more* than ``value``; `resolve_estimates` grows it like Rule O (SPEC §5).
     """
 
     value: Resources
@@ -49,6 +52,7 @@ class EstimateResult:
     complete: bool = True
     # Complete observations behind the value (rule A, SPEC §5); 0 = unknown, the safe side.
     observations: int = 0
+    lower_bound_only: bool = False
 
     @property
     def trusted(self) -> bool:
@@ -270,7 +274,11 @@ class HistoryEstimator:
                 entry.lower_bound is None or not entry.lower_bound.exceeds(entry.complete)
             )
             return EstimateResult(
-                entry.value, level, complete=complete, observations=entry.observation_count
+                entry.value,
+                level,
+                complete=complete,
+                observations=entry.observation_count,
+                lower_bound_only=entry.complete is None,
             )
         return None
 
@@ -338,8 +346,13 @@ class StaticEstimator:
         return None
 
 
-def resolve_estimates(state: State, estimator: Estimator) -> Snapshot:
-    """Ask the estimator about every unfinished job, so ``decide`` can stay pure."""
+def resolve_estimates(state: State, estimator: Estimator, config: Config | None = None) -> Snapshot:
+    """Ask the estimator about every unfinished job, so ``decide`` can stay pure.
+
+    A lower-bound-only answer becomes ``min(value * oom_growth, capacity)`` per dimension
+    (never below the value), the step Rule O gives the OOM'd job itself (SPEC §5).
+    """
+    growth = (config or Config()).oom_growth
     estimates: dict[JobId, Mapping[DeviceId, Resources | None]] = {}
     trusted: set[tuple[JobId, DeviceId]] = set()
     observations: dict[tuple[JobId, DeviceId], int] = {}
@@ -351,6 +364,8 @@ def resolve_estimates(state: State, estimator: Estimator) -> Snapshot:
             result = estimator.estimate(rt.job, state.devices[d].device)
             if isinstance(result, EstimateResult):
                 per_device[d] = result.value
+                if result.lower_bound_only:
+                    per_device[d] = _grow(result.value, state.devices[d].capacity, growth)
                 if result.trusted:
                     trusted.add((rt.id, d))
                     observations[(rt.id, d)] = result.observations
@@ -358,6 +373,17 @@ def resolve_estimates(state: State, estimator: Estimator) -> Snapshot:
                 per_device[d] = result
         estimates[rt.id] = frozen_map(per_device)
     return Snapshot(state, frozen_map(estimates), frozenset(trusted), frozen_map(observations))
+
+
+def _grow(lower: Resources, capacity: Resources, growth: float) -> Resources:
+    """Rule O's step for a lower bound: ``lower * growth``, capped at capacity where it is
+    positive, never below ``lower``."""
+    return Resources(
+        {
+            dim: max(v, min(v * growth, capacity[dim]) if capacity[dim] > 0 else v * growth)
+            for dim, v in lower.items()
+        }
+    )
 
 
 def apply_history(estimator: Estimator, state: State, records: Iterable[HistoryRecord]) -> None:

@@ -5,6 +5,7 @@ import json
 import pytest
 
 from rampgate import (
+    Config,
     Device,
     EstimateResult,
     ExitKind,
@@ -87,12 +88,12 @@ def test_lower_bounds_alone_are_not_trusted() -> None:
     est = HistoryEstimator(InMemoryHistoryStore())
     est.record(job("k", "family"), A100, Resources(vram=15), lower_bound=True)
     result = est.estimate(job("k", "family"), A100)
-    assert result == EstimateResult(Resources(vram=15), 0, complete=False)
+    assert result == EstimateResult(Resources(vram=15), 0, complete=False, lower_bound_only=True)
     assert result is not None
     assert not result.trusted
     est.record(job("family"), A100, Resources(vram=36))  # complete, at a fallback level only
     assert est.estimate(job("k", "family"), A100) == EstimateResult(
-        Resources(vram=15), 0, complete=False
+        Resources(vram=15), 0, complete=False, lower_bound_only=True
     )
     est.record(job("k"), A100, Resources(vram=10))  # a complete record at level 0, newer
     result = est.estimate(job("k", "family"), A100)
@@ -110,6 +111,41 @@ def test_a_running_record_makes_siblings_trusted() -> None:
     snap = resolve_estimates(d.state, est)
     assert snap.estimates["sibling"][GPU] == Resources(vram=40)
     assert snap.is_trusted(d.state.jobs["sibling"], GPU)
+
+
+def test_a_lower_bound_only_estimate_grows_like_rule_o_for_siblings() -> None:
+    # SPEC §5 (after held-out evaluation 1): "needed more than 40" is not an admission
+    # estimate of 40. A sibling gets min(40 * oom_growth, capacity), and stays untrusted.
+    est = HistoryEstimator(InMemoryHistoryStore())
+    d = Driver().submit("sibling", fingerprint=("k",))
+    est.record(
+        d.state.jobs["sibling"].job,
+        d.state.devices[GPU].device,
+        Resources(vram=40),
+        lower_bound=True,
+    )
+    snap = resolve_estimates(d.state, est, Config(oom_growth=1.25))
+    assert snap.estimates["sibling"][GPU] == Resources(vram=50)
+    assert not snap.is_trusted(d.state.jobs["sibling"], GPU)
+    # Capped at capacity (100 in the test kit), never below the lower bound itself.
+    big = HistoryEstimator(InMemoryHistoryStore())
+    big.record(
+        d.state.jobs["sibling"].job,
+        d.state.devices[GPU].device,
+        Resources(vram=90),
+        lower_bound=True,
+    )
+    assert resolve_estimates(d.state, big).estimates["sibling"][GPU] == Resources(vram=100)
+
+
+def test_a_newer_lower_bound_above_a_complete_record_is_not_grown() -> None:
+    # Only a key with *no* complete record is lower-bound-only (SPEC §5, wording of the change).
+    est = HistoryEstimator(InMemoryHistoryStore())
+    d = Driver().submit("sibling", fingerprint=("k",))
+    j, gpu = d.state.jobs["sibling"].job, d.state.devices[GPU].device
+    est.record(j, gpu, Resources(vram=36), record_id="x:1:d:peak")
+    est.record(j, gpu, Resources(vram=40), lower_bound=True, record_id="y:1:d:lower_bound")
+    assert resolve_estimates(d.state, est).estimates["sibling"][GPU] == Resources(vram=40)
 
 
 def test_an_older_lower_bound_does_not_override_a_later_success() -> None:
@@ -222,7 +258,7 @@ def test_apply_history_feeds_success_and_oom_records() -> None:
     assert history == (HistoryRecord("j", GPU, Resources(vram=40), True, 1),)
     apply_history(est, state, history)
     gpu = state.devices[GPU].device
-    lower = EstimateResult(Resources(vram=40), 0, complete=False)
+    lower = EstimateResult(Resources(vram=40), 0, complete=False, lower_bound_only=True)
     assert est.estimate(state.jobs["j"].job, gpu) == lower
     apply_history(est, state, [HistoryRecord("ghost", GPU, Resources(vram=1), False, 1)])
 

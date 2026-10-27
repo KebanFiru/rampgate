@@ -202,7 +202,7 @@ class Engine:
             raise ValueError(f"time went backwards: tick({now}) after tick({self._now})")
         state, ignored, history = drain(self._state)
         apply_history(self.estimator, state, history)
-        snapshot = resolve_estimates(state, self.estimator)
+        snapshot = resolve_estimates(state, self.estimator, self.config)
         decision = decide(snapshot, now, self.config, self.policy, self.admission)
         for action in decision.actions:
             state = reduce(state, action, self.config)
