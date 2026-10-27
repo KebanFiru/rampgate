@@ -46,6 +46,7 @@ class RequeueReason(StrEnum):
     OOM = "OOM"
     START_TIMEOUT = "START_TIMEOUT"
     LOST = "LOST"
+    VACATED = "VACATED"  # Rule V: stopped to relieve an overloaded device, back to PENDING
 
 
 class FailReason(StrEnum):
@@ -112,6 +113,8 @@ class Stop(_ActionMixin):
     attempt: int
     reason: StopReason
     grace_s: float
+    # Rule V (SPEC §5): stopped by rampgate itself; the job returns to PENDING after exit.
+    vacate: bool = False
 
 
 @dataclass(frozen=True, slots=True)

@@ -221,6 +221,7 @@ def _end_attempt(rt: JobRuntime, new_state: JobState, **changes: Any) -> JobRunt
         rt,
         state=new_state,
         stop_intent=None,
+        vacating=False,
         usage=frozen_map(),
         usage_samples=frozen_map(),
         reservation=frozen_map(),
@@ -435,6 +436,11 @@ def _exit_while_stopping(
     Applies whenever a stop was requested, whether or not the ``Stop`` was sent yet.
     A stopped job is never re-queued and never FAILED (I13).
     """
+    if rt.vacating and intent is StopReason.PREEMPT:
+        return _vacated_exit(state, rt, ev, config)
+    if rt.vacating and ev.kind in (ExitKind.PREEMPTED, ExitKind.LOST):
+        # A cancel requested while Rule V was vacating the job wins (SPEC §5).
+        return _put(state, _end_attempt(rt, JobState.CANCELLED))
     on_stop = JobState.PREEMPTED if intent is StopReason.PREEMPT else JobState.CANCELLED
     match ev.kind:
         case ExitKind.SUCCESS:
@@ -443,6 +449,7 @@ def _exit_while_stopping(
         case ExitKind.OOM if intent is StopReason.PREEMPT:
             learned, records, _ = _learn_from_oom(state, rt, ev, config)
             rt = replace(rt, oom_count=rt.oom_count + 1, learned=learned)
+            state, rt = _isolate_if_unstable(state, rt)
             return _put(_record(state, records), _end_attempt(rt, JobState.PREEMPTED))
         case ExitKind.OOM:
             state = _record(state, _observed_peaks(rt, lower_bound=True))
@@ -458,6 +465,38 @@ def _exit_while_stopping(
         case ExitKind.LOST:
             return _put(state, _end_attempt(rt, on_stop))
     raise AssertionError(ev.kind)  # pragma: no cover
+
+
+def _vacated_exit(state: State, rt: JobRuntime, ev: JobExited, config: Config) -> State:
+    """Rule V (SPEC §5): a vacated job returns to PENDING (I13's exception) and waits until
+    its observed peak really fits; an OOM is learned as Rule O says, a success is a success."""
+    match ev.kind:
+        case ExitKind.SUCCESS:
+            state = _record(state, _observed_peaks(rt, lower_bound=False))
+            return _put(state, _end_attempt(rt, JobState.SUCCEEDED))
+        case ExitKind.OOM:
+            return _oom(state, rt, ev, config)
+        case ExitKind.CANCELLED:
+            return _put(state, _end_attempt(rt, JobState.CANCELLED))
+        case ExitKind.FAILURE:
+            state = _emit(state, Warn(UncleanStop(rt.id, rt.attempt)))
+    learned = dict(rt.learned)
+    for d in rt.job.devices:
+        if d in rt.last_obs_t:
+            known = learned.get(d)
+            learned[d] = rt.peak[d] if known is None else known.max(rt.peak[d])
+    rt = _requeue(rt, learned=frozen_map(learned))
+    state = _emit(state, Requeue(rt.id, rt.attempt, _estimates(rt), RequeueReason.VACATED))
+    return _put(state, rt)
+
+
+def _isolate_if_unstable(state: State, rt: JobRuntime) -> tuple[State, JobRuntime]:
+    """Isolation retry (SPEC §5): a job that OOMed before it was stable gets the flag, with
+    the order of this OOM."""
+    if rt.reservation or rt.isolate_seq is not None:  # STABLE once: it has a reservation
+        return state, rt
+    rt = replace(rt, isolate_seq=state.next_order)
+    return replace(state, next_order=state.next_order + 1), rt
 
 
 def _room_at_oom(
@@ -535,6 +574,7 @@ def _learn_from_oom(
 def _oom(state: State, rt: JobRuntime, ev: JobExited, config: Config) -> State:
     learned, records, exceeds_capacity = _learn_from_oom(state, rt, ev, config)
     rt = replace(rt, oom_count=rt.oom_count + 1, learned=learned)
+    state, rt = _isolate_if_unstable(state, rt)
     state = _record(state, records)
     if exceeds_capacity:
         state = _emit(state, Fail(rt.id, rt.attempt, FailReason.EXCEEDS_DEVICE_CAPACITY))
@@ -562,6 +602,8 @@ def _preempt_requested(state: State, ev: PreemptRequested) -> State:
     rt = _job(state, ev.job_id)
     if rt.state is JobState.PENDING:
         return _put(state, replace(rt, state=JobState.PREEMPTED))
+    if rt.vacating:  # the user's preempt wins over Rule V: the job ends PREEMPTED
+        return _put(state, replace(rt, vacating=False))
     if rt.state is JobState.PREEMPTED or rt.stop_intent is not None:
         return _ignore(state, ev, IgnoreReason.DUPLICATE)
     if rt.state in ACTIVE_STATES:
@@ -661,9 +703,10 @@ def _start(state: State, a: Start, config: Config) -> State:
         "starting_since": a.issued_at,
         "admitted_estimate": frozen_map(a.estimate),
         "applied": rt.applied | {(a.attempt, _START)},
+        "admit_seq": state.next_order,
     }
     rt = replace(rt, **fields)
-    return _put(state, rt)
+    return _put(replace(state, next_order=state.next_order + 1), rt)
 
 
 def _stop(state: State, a: Stop) -> State:
@@ -674,6 +717,15 @@ def _stop(state: State, a: Stop) -> State:
         raise _bad(rt, f"Stop for future attempt {a.attempt}")
     if (a.attempt, _EXITED) in rt.applied:
         return state
+    if a.vacate:  # Rule V: rampgate's own stop, no request needed
+        if rt.state not in ACTIVE_STATES or rt.stop_intent is not None:
+            raise _bad(rt, "Stop(vacate) needs a running job without a stop request")
+        if a.reason is not StopReason.PREEMPT:
+            raise _bad(rt, "Stop(vacate) is a preempt")
+        return _put(
+            state,
+            replace(rt, state=JobState.STOPPING, stop_intent=StopReason.PREEMPT, vacating=True),
+        )
     if rt.state not in ACTIVE_STATES or rt.stop_intent is not a.reason:
         raise _bad(rt, f"Stop({a.reason}) without a matching request")
     return _put(state, replace(rt, state=JobState.STOPPING))
@@ -695,6 +747,7 @@ def _mark_stable(state: State, a: MarkStable) -> State:
         stable_at=a.issued_at,
         reservation=frozen_map(a.reservation),
         lost_count=0,
+        isolate_seq=None,
         applied=rt.applied | {(a.attempt, _STABLE)},
     )
     state = _record(state, _running_records(rt, rt.job.devices))

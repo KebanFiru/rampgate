@@ -38,6 +38,9 @@ class Config:
     unknown_min_free: Resources | float = 0.10
     # Rule P for jobs without a trusted estimate only (default), or for every job.
     probation: Literal["untrusted_only", "all"] = "untrusted_only"
+    # Rule V: vacate when managed load exceeds C * (1 - headroom). From the simulator's
+    # noise bound (2 %); calibrate on real hardware.
+    vacate_headroom: float = 0.02
 
     def __post_init__(self) -> None:
         for f in fields(self):
@@ -75,6 +78,8 @@ class Config:
             raise ValueError("min_warmup_s must be <= max_warmup_s")
         if self.foreign_tolerance >= 1:
             raise ValueError("foreign_tolerance must be < 1")
+        if self.vacate_headroom >= 1:
+            raise ValueError("vacate_headroom must be < 1")
 
     def unknown_min_free_for(self, capacity: Resources) -> Resources:
         """``unknown_min_free`` on a device: absolute, or a fraction of its capacity."""

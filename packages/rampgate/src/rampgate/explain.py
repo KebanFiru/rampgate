@@ -20,6 +20,7 @@ __all__ = [
     "InsufficientResources",
     "RejectedByAdmission",
     "UnknownEstimateBlocked",
+    "WaitingForIsolation",
     "WaitingForWarmup",
 ]
 
@@ -98,6 +99,14 @@ class RejectedByAdmission:
 
 
 @dataclass(frozen=True, slots=True)
+class WaitingForIsolation:
+    """An isolation retry (it OOMed before it was stable) waits for ``device_id`` to be empty
+    of other managed jobs (SPEC §5)."""
+
+    device_id: DeviceId
+
+
+@dataclass(frozen=True, slots=True)
 class AwaitingResume:
     """The job is PREEMPTED and waits for ``ResumeRequested``."""
 
@@ -113,4 +122,5 @@ Explanation: TypeAlias = (
     | BlockedByForeignUsage
     | RejectedByAdmission
     | AwaitingResume
+    | WaitingForIsolation
 )

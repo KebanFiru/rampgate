@@ -201,6 +201,13 @@ class JobRuntime:
     epoch_baseline: int | None = None
     epoch_latest: int | None = None
     reservation: Mapping[DeviceId, Resources] = field(default_factory=frozen_map)
+    # Order of the latest Start among all jobs (Rule V picks the newest as its victim).
+    admit_seq: int | None = None
+    # Stopped by Rule V: returns to PENDING after exit unless a user stop request wins.
+    vacating: bool = False
+    # Isolation retry (SPEC §5): set when the job OOMed before it was stable, cleared at
+    # MarkStable; the order of that OOM, so the oldest one holds a device.
+    isolate_seq: int | None = None
 
     @property
     def id(self) -> JobId:
@@ -279,6 +286,8 @@ class State:
     active_warnings: Mapping[str, WarningKind] = field(default_factory=frozen_map)
     pause_reason: QueueStopped | None = None
     removed_devices: frozenset[DeviceId] = frozenset()
+    # Counter for JobRuntime.admit_seq and isolate_seq.
+    next_order: int = 0
 
     @classmethod
     def initial(cls, devices: Iterable[Device] = ()) -> State:

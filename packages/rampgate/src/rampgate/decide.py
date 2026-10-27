@@ -6,7 +6,8 @@ steps see the effect of earlier ones within the same tick:
 1. actions waiting in the outbox;
 2. ``Requeue(START_TIMEOUT)`` for jobs stuck in STARTING;
 3. ``Stop`` for jobs with a stop request;
-4. ``MarkStable`` (Rule S);
+4. ``MarkStable`` (Rule S), then ``Stop(vacate=True)`` (Rule V) on devices a managed
+   change pushed above ``C * (1 - vacate_headroom)``;
 5. ``Warn(QueueStopped)`` for STOP_QUEUE failures (it pauses admission);
 6. admission in policy order, with per-device head-of-line blocking. The
    `Admission` decides whether a candidate fits a device and whether Rule P's
@@ -20,7 +21,7 @@ steps see the effect of earlier ones within the same tick:
 
 from __future__ import annotations
 
-from collections.abc import Mapping
+from collections.abc import Iterable, Mapping
 from dataclasses import dataclass, field, replace
 from typing import Protocol
 
@@ -37,6 +38,7 @@ from rampgate.actions import (
     RequeueReason,
     Start,
     Stop,
+    UpdateReservation,
     Warn,
     WarnCleared,
     WarningKind,
@@ -54,6 +56,7 @@ from rampgate.explain import (
     InsufficientResources,
     RejectedByAdmission,
     UnknownEstimateBlocked,
+    WaitingForIsolation,
     WaitingForWarmup,
 )
 from rampgate.model import (
@@ -64,6 +67,7 @@ from rampgate.model import (
     JobState,
     Snapshot,
     State,
+    StopReason,
     frozen_map,
 )
 from rampgate.policies.base import OrderingPolicy
@@ -79,6 +83,8 @@ __all__ = [
     "ProbationAdmission",
     "decide",
     "device_loads",
+    "managed_changes",
+    "managed_load",
     "measured_free",
 ]
 
@@ -224,10 +230,16 @@ class Admission(Protocol):
 
 @dataclass(frozen=True, slots=True)
 class ProbationAdmission:
-    """rampgate's own admission: Rule A, optionally without Rule P (an ablation)."""
+    """rampgate's own admission: Rule A, optionally without Rule P (an ablation).
+
+    ``vacate`` (Rule V) and ``isolation`` (isolation retry) are rampgate's own rules too;
+    `decide` applies them only for admissions that set them, so baselines are unchanged.
+    """
 
     name: str = "Probation"
     probation: bool = True
+    vacate: bool = True
+    isolation: bool = True
 
     def fits(
         self,
@@ -294,6 +306,8 @@ def decide(
     _start_timeouts(tick)
     _stops(tick)
     _mark_stable(tick)
+    if getattr(admission, "vacate", False):
+        _vacate(tick)
     queue_stops = getattr(policy, "queue_stops", None)
     for group, job_id in queue_stops(tick.state) if queue_stops is not None else ():
         tick.warn_once(QueueStopped(group, job_id))
@@ -339,7 +353,87 @@ def _mark_stable(tick: _Tick) -> None:
         tick.emit(MarkStable(rt.id, rt.attempt, reservation, tick.now))
 
 
-def _admit(tick: _Tick, policy: OrderingPolicy, admission: Admission) -> None:
+def managed_changes(actions: Iterable[Action]) -> set[DeviceId]:
+    """Devices where a STABLE reservation changed (Rule V's trigger): a ``MarkStable`` or
+    ``UpdateReservation`` among ``actions``. Warming usage and foreign usage never trigger."""
+    changed: set[DeviceId] = set()
+    for action in actions:
+        if isinstance(action, MarkStable | UpdateReservation):
+            changed.update(action.reservation)
+    return changed
+
+
+def managed_load(rt: JobRuntime, d: DeviceId) -> Resources:
+    """Rule V's ``U_d`` term of a job: its observed peak once STABLE, else its usage."""
+    if rt.state is JobState.STABLE:
+        return rt.peak.get(d, Resources())
+    return rt.usage.get(d, Resources())
+
+
+def _vacate(tick: _Tick) -> None:
+    """Rule V (SPEC §5): where a ``MarkStable``/``UpdateReservation`` left
+    ``U_d > C * (1 - vacate_headroom)``, stop the newest admitted STABLE jobs until it fits.
+    A ramping job is never a victim (it keeps growing while it stops), and the last
+    non-stopping managed job on a device is never vacated."""
+    for d in sorted(managed_changes(tick.actions)):
+        ds = tick.state.devices.get(d)
+        if ds is None:
+            continue
+        limit = ds.capacity.scale(1 - tick.config.vacate_headroom)
+        foreign = ds.foreign_at(tick.now, tick.config.foreign_window_s)
+        running = [
+            rt for rt in tick.state.jobs_on(d) if rt.state in (*_WARMING_LIKE, JobState.STABLE)
+        ]
+        while len(running) > 1:
+            load = foreign
+            for rt in running:
+                load = load + managed_load(rt, d)
+            stable = [rt for rt in running if rt.state is JobState.STABLE]
+            if not stable or not load.exceeds(limit):
+                break
+            victim = max(stable, key=lambda rt: (rt.admit_seq or -1, rt.submit_seq))
+            tick.emit(
+                Stop(
+                    victim.id,
+                    victim.attempt,
+                    StopReason.PREEMPT,
+                    tick.config.preempt_grace_s,
+                    vacate=True,
+                )
+            )
+            running.remove(victim)
+
+
+def _isolation_holders(state: State) -> dict[DeviceId, JobId]:
+    """Per device, the waiting isolation job with the oldest OOM requeue (SPEC §5)."""
+    holders: dict[DeviceId, JobId] = {}
+    waiting = [
+        rt
+        for rt in state.jobs.values()
+        if rt.state is JobState.PENDING and rt.isolate_seq is not None
+    ]
+    for rt in sorted(waiting, key=lambda rt: rt.isolate_seq or 0):
+        for d in rt.job.devices:
+            holders.setdefault(d, rt.id)
+    return holders
+
+
+def _isolation_wait(
+    state: State, rt: JobRuntime, isolating: Mapping[DeviceId, JobId]
+) -> Explanation | None:
+    """Why an isolation retry, or a job on a device it holds, cannot start (SPEC §5)."""
+    taken = [d for d in rt.job.devices if isolating.get(d, rt.id) != rt.id]
+    if taken:
+        return DeviceHeldFor(taken[0], isolating[taken[0]])
+    if rt.isolate_seq is None:
+        return None
+    for d in rt.job.devices:
+        if any(o.id != rt.id and o.state in ACTIVE_STATES for o in state.jobs_on(d)):
+            return WaitingForIsolation(d)
+    return None
+
+
+def _admit(tick: _Tick, policy: OrderingPolicy, admission: Admission) -> None:  # noqa: PLR0915 - one ordered pass
     if tick.state.paused:
         return
     tick.admission_evaluated = True
@@ -355,6 +449,8 @@ def _admit(tick: _Tick, policy: OrderingPolicy, admission: Admission) -> None:
     trust_mode = tick.config.probation == "untrusted_only"
     held: dict[DeviceId, JobId] = {}
     blocking = bool(getattr(policy, "head_of_line_blocking", False))
+    isolation = bool(getattr(admission, "isolation", False))
+    isolating = _isolation_holders(tick.state) if isolation else {}
 
     for job_id in list(policy.candidates(tick.state, tick.now)):
         rt = tick.state.jobs.get(job_id)
@@ -367,6 +463,14 @@ def _admit(tick: _Tick, policy: OrderingPolicy, admission: Admission) -> None:
             tick.explanations[job_id] = DeviceHeldFor(d, held[d])
             for other in devices:
                 held.setdefault(other, rt.id)
+            continue
+
+        waiting = _isolation_wait(tick.state, rt, isolating) if isolation else None
+        if waiting is not None:
+            tick.explanations[job_id] = waiting
+            if blocking:
+                for d in devices:
+                    held.setdefault(d, rt.id)
             continue
 
         estimates = {d: tick.snapshot.estimate(rt, d) for d in devices}

@@ -28,7 +28,7 @@ __all__ = [
 ]
 
 STATE_FORMAT = "rampgate.state"
-SCHEMA_VERSION = 3
+SCHEMA_VERSION = 4
 
 
 def _v1_to_v2(payload: Any) -> Any:
@@ -58,8 +58,27 @@ def _v2_to_v3(payload: Any) -> Any:
     return payload
 
 
+def _v3_to_v4(payload: Any) -> Any:
+    """v4 adds Rule V and the isolation retry: ``JobRuntime.admit_seq``, ``vacating`` and
+    ``isolate_seq``, ``State.next_order`` and ``Stop.vacate``; v3 dumps start without them."""
+    if isinstance(payload, dict):
+        out = {k: _v3_to_v4(v) for k, v in payload.items()}
+        if out.get("$t") == "JobRuntime":
+            out["f"].setdefault("admit_seq", None)
+            out["f"].setdefault("vacating", False)
+            out["f"].setdefault("isolate_seq", None)
+        if out.get("$t") == "State":
+            out["f"].setdefault("next_order", 0)
+        if out.get("$t") == "Stop":
+            out["f"].setdefault("vacate", False)
+        return out
+    if isinstance(payload, list):
+        return [_v3_to_v4(v) for v in payload]
+    return payload
+
+
 # MIGRATIONS[v] upgrades a version-v ``state`` payload to version v + 1.
-MIGRATIONS: dict[int, Callable[[Any], Any]] = {1: _v1_to_v2, 2: _v2_to_v3}
+MIGRATIONS: dict[int, Callable[[Any], Any]] = {1: _v1_to_v2, 2: _v2_to_v3, 3: _v3_to_v4}
 
 
 class UnsupportedSchema(ValueError):

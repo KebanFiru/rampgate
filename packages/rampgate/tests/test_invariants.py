@@ -1,6 +1,6 @@
 """SPEC §10 invariants under hypothesis-generated scenarios run through the simulator.
 
-Checked here: I1-I7, I9, I10, I13, I15, I17 (per tick), I11 (fact-event replay) and
+Checked here: I1-I7, I9, I10, I13, I15, I17-I19 (per tick), I11 (fact-event replay) and
 I11b (command idempotence). I12 is checked by the reducer state machine
 (the simulator never produces LOST); I14 by ``test_sim``; I8 belongs to L3.
 """
@@ -58,6 +58,8 @@ from rampgate import (
     warning_key,
 )
 from rampgate import DeviceObserved as DeviceObs
+from rampgate.decide import managed_changes, managed_load
+from rampgate.model import ACTIVE_STATES as ACTIVE
 from rampgate.reducer import _room_at_oom
 from rampgate.sim import (
     Command,
@@ -192,7 +194,7 @@ def check_i1(state: State, cfg: Config = CFG) -> None:
 def check_starts(
     tick: Tick, policy: OrderingPolicy, cfg: Config = CFG, *, history: bool = False
 ) -> None:
-    """I2, I3, I9, I10 (resume flag), I15 and I17, replaying the decision on its snapshot.
+    """I2, I3, I9, I10 (resume flag), I15, I17 and I19, replaying the decision on its snapshot.
 
     ``history``: the run used a `HistoryEstimator`, so a sibling of a STABLE job
     (shared fingerprint key, same device) must start with an estimate (Rule H + P).
@@ -223,6 +225,18 @@ def check_starts(
                             rt.id,
                             o.id,
                         )
+            for d in action.placement:  # I19: isolation retries start alone, holders are respected
+                if rt.isolate_seq is not None:
+                    others = [o.id for o in work.jobs_on(d) if o.id != rt.id and o.state in ACTIVE]
+                    assert not others, (rt.id, d, others)
+                waiting = [
+                    o
+                    for o in work.jobs_on(d)
+                    if o.state is JobState.PENDING and o.isolate_seq is not None
+                ]
+                if waiting:
+                    holder = min(waiting, key=lambda o: o.isolate_seq or 0)
+                    assert holder.id == rt.id, (rt.id, d, holder.id)
             for d in action.placement:  # I17: an untrusted warming job holds d against any start
                 for o in work.jobs_on(d):
                     holds = o.state in (JobState.STARTING, JobState.WARMING) or (
@@ -252,6 +266,33 @@ def check_starts(
         work = reduce(work, action, cfg)
 
 
+def check_i18(tick: Tick, cfg: Config = CFG) -> None:
+    """I18: after decide, no device a MarkStable/UpdateReservation touched is left above
+    ``C * (1 - vacate_headroom)`` while a STABLE job other than the last could be vacated;
+    every vacate stopped a STABLE job."""
+    work = tick.snapshot.state
+    for action in tick.decision.actions:
+        if isinstance(action, Stop) and action.vacate:
+            assert work.jobs[action.job_id].state is JobState.STABLE, action.job_id
+        work = reduce(work, action, cfg)
+    after = tick.after
+    for d in managed_changes(tick.decision.actions):
+        if d not in after.devices:
+            continue
+        ds = after.devices[d]
+        running = [
+            rt
+            for rt in after.jobs_on(d)
+            if rt.state in (JobState.STARTING, JobState.WARMING, JobState.STABLE)
+        ]
+        load = ds.foreign_at(tick.now, cfg.foreign_window_s)
+        for rt in running:
+            load = load + managed_load(rt, d)
+        over = bool(load.exceeds(ds.capacity.scale(1 - cfg.vacate_headroom)))
+        stable = any(rt.state is JobState.STABLE for rt in running)
+        assert not over or len(running) <= 1 or not stable, (tick.now, d, load)
+
+
 def check_purity(tick: Tick, policy: OrderingPolicy, cfg: Config = CFG) -> None:
     """I4 (determinism) and I5 (no duplicate Start/Stop right after applying a decision)."""
     assert decide(tick.snapshot, tick.now, cfg, policy) == replace(tick.decision, ignored_events=())
@@ -273,7 +314,15 @@ def check_exits(prev: State, tick: Tick) -> None:
         if not isinstance(event, JobExited) or before is None or before.attempt != event.attempt:
             continue
         after = work.jobs[event.job_id]
-        if before.stop_intent is not None:  # I13
+        if before.vacating:  # I13's exception: Rule V returns the job to PENDING
+            assert after.state in (
+                JobState.SUCCEEDED,
+                JobState.PENDING,
+                JobState.CANCELLED,
+                JobState.FAILED,
+            )
+            assert after.state is not JobState.FAILED or event.kind.value == "OOM"
+        elif before.stop_intent is not None:  # I13
             assert after.state in (JobState.SUCCEEDED, JobState.PREEMPTED, JobState.CANCELLED)
             assert after.attempt == before.attempt
         elif event.kind.value == "OOM":  # I7
@@ -341,6 +390,7 @@ def test_invariants_hold_in_simulation(case: tuple[Scenario, OrderingPolicy]) ->
         check_exits(prev, tick)
         check_starts(tick, policy, cfg, history=True)
         check_purity(tick, policy, cfg)
+        check_i18(tick, cfg)
         check_explained(tick)
         check_i16(tick, raised)
         for state in (tick.snapshot.state, tick.after):

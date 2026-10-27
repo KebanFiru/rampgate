@@ -78,6 +78,7 @@ from rampgate.explain import (
     InsufficientResources,
     RejectedByAdmission,
     UnknownEstimateBlocked,
+    WaitingForIsolation,
     WaitingForWarmup,
 )
 from rampgate.model import (
@@ -205,6 +206,7 @@ __all__ = [
     "Unreconciled",
     "UnsupportedSchema",
     "UpdateReservation",
+    "WaitingForIsolation",
     "WaitingForWarmup",
     "Warn",
     "WarnCleared",
