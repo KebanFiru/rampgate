@@ -66,6 +66,9 @@ METRICS = (
     "utilization",
     "wait_p50",
     "wait_p95",
+    "vacated",
+    "isolation_wait_s",
+    "overcommitted_warnings",
 )
 GROUPS: dict[str, tuple[Strategy, ...]] = {
     "main": MAIN,

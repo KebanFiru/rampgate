@@ -8,7 +8,7 @@ from collections.abc import Mapping, Sequence
 from dataclasses import dataclass
 from typing import Any, Literal
 
-from rampgate.actions import Start
+from rampgate.actions import Overcommitted, Requeue, RequeueReason, Start, Warn
 from rampgate.estimators import Estimator, HistoryEstimator, InMemoryHistoryStore, NullEstimator
 from rampgate.events import JobExited, JobSubmitted
 from rampgate.model import DeviceId, ExitKind, JobId, JobState, State
@@ -46,6 +46,10 @@ class Report:
     - ``wait_p50`` / ``wait_p95``: queue wait, from a job's submission to its
       first ``Start``. A job never started counts as infinitely long; a
       quantile that reaches it is ``math.inf``.
+    - ``vacated``: Rule V vacates (``Requeue(VACATED)`` actions).
+    - ``isolation_wait_s``: summed over isolation retries, the time from the OOM requeue to
+      the next ``Start`` (to the end of the run if it never started).
+    - ``overcommitted_warnings``: ``Warn(Overcommitted)`` actions (SPEC §13, v0.2 note).
     """
 
     makespan: float | None
@@ -63,6 +67,9 @@ class Report:
     wait_p95: float
     max_overcommit: float
     timeline: tuple[TimelineEntry, ...]
+    vacated: int = 0
+    isolation_wait_s: float = 0.0
+    overcommitted_warnings: int = 0
 
     @property
     def censored(self) -> bool:
@@ -90,6 +97,9 @@ class Report:
             "wait_p50": finite(self.wait_p50),
             "wait_p95": finite(self.wait_p95),
             "max_overcommit": self.max_overcommit,
+            "vacated": self.vacated,
+            "isolation_wait_s": self.isolation_wait_s,
+            "overcommitted_warnings": self.overcommitted_warnings,
         }
 
     @property
@@ -152,7 +162,9 @@ def _first_contact(
     return "hint" if found else None
 
 
-def report(trace: Trace, scenario: Scenario) -> Report:
+def report(trace: Trace, scenario: Scenario, *, isolation: bool = False) -> Report:
+    """Metrics of a trace. ``isolation``: the run used the isolation retry, so its waits
+    are counted (``isolation_wait_s``)."""
     world = trace.world
     assert world is not None, "trace without world stats"
     start = trace.ticks[0].now
@@ -164,8 +176,22 @@ def report(trace: Trace, scenario: Scenario) -> Report:
     started: dict[JobId, float] = {}
     first_contact: Counter[FirstContact] = Counter()
     answered: dict[tuple[JobId, int], frozenset[DeviceId]] = {}
+    vacated = overcommitted = 0
+    isolating: dict[JobId, float] = {}
+    isolation_wait = 0.0
     before = State.initial(scenario.devices)
     for tick in trace.ticks:
+        for action in tick.decision.actions:
+            if isinstance(action, Requeue) and action.reason is RequeueReason.VACATED:
+                vacated += 1
+            elif isinstance(action, Requeue) and action.reason is RequeueReason.OOM:
+                after = tick.after.jobs.get(action.job_id)
+                if isolation and after is not None and after.isolate_seq is not None:
+                    isolating.setdefault(action.job_id, tick.now)
+            elif isinstance(action, Start) and action.job_id in isolating:
+                isolation_wait += tick.now - isolating.pop(action.job_id)
+            elif isinstance(action, Warn) and isinstance(action.warning, Overcommitted):
+                overcommitted += 1
         for event in tick.events:
             if isinstance(event, JobExited) and event.kind is ExitKind.OOM:
                 kind = _first_contact(before, event, answered)
@@ -217,6 +243,9 @@ def report(trace: Trace, scenario: Scenario) -> Report:
         wait_p95=quantile(waits, 0.95) if waits else 0.0,
         max_overcommit=max(world.max_overcommit.values(), default=0.0),
         timeline=world.timeline,
+        vacated=vacated,
+        isolation_wait_s=isolation_wait + sum(end - t for t in isolating.values()),
+        overcommitted_warnings=overcommitted,
     )
 
 
@@ -249,4 +278,4 @@ def run(
         admission=strategy.admission,
         **sim_kwargs,
     )
-    return report(trace, scenario)
+    return report(trace, scenario, isolation=getattr(strategy.admission, "isolation", False))
