@@ -240,12 +240,26 @@ def git_commit() -> str:
     return sha + ("-dirty" if dirty else "")
 
 
+def git_tag() -> str | None:
+    """The tag on HEAD, or None (no tag, or git not available)."""
+    try:
+        return subprocess.run(
+            ["git", "describe", "--tags", "--exact-match", "HEAD"],
+            capture_output=True,
+            text=True,
+            check=True,
+        ).stdout.strip()
+    except (OSError, subprocess.CalledProcessError):
+        return None
+
+
 def results_json(args: argparse.Namespace, runs: list[dict[str, Any]]) -> dict[str, Any]:
     used = sorted({r["strategy"] for r in runs})
     return {
         "meta": {
             "rampgate_version": rampgate.__version__,
             "git_commit": args.commit or git_commit(),
+            "tag": args.tag or git_tag(),
             "python": platform.python_version(),
             "seeds": list(seeds(args)),
             "warm_seed_offset": WARM_SEED_OFFSET,
@@ -437,6 +451,7 @@ def main(argv: Sequence[str] | None = None) -> int:
     parser.add_argument(
         "--commit", help="commit to record in results.json (when git is not available)"
     )
+    parser.add_argument("--tag", help="git tag to record in results.json (default: HEAD's tag)")
     parser.add_argument("--scenarios", nargs="+", default=list(NAMES), choices=NAMES)
     parser.add_argument("--strategies", nargs="+", default=[], choices=sorted(STRATEGIES))
     parser.add_argument("--groups", nargs="+", default=list(GROUPS), choices=list(GROUPS))

@@ -1,5 +1,9 @@
 # uv workspace root: dev tooling only, never published.
 
+[tool.uv]
+# The dev container syncs the bench group too, so benchmark runs can always plot.
+default-groups = ["dev", "bench"]
+
 [tool.uv.workspace]
 members = ["packages/*"]
 

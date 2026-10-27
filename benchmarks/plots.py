@@ -8,10 +8,17 @@ baselines, ablations, cold and warm rampgate and the ``trusted_margin`` sweep.
 In the per-scenario figures strategies are on the x axis, so color only
 separates rampgate's rows (blue) from the baselines (gray). Censored runs are
 drawn as a triangle at the top of the panel, labelled ``> max_time``.
+
+Every figure carries a footer with the tag, commit and seed set of the run.
+Plots can be redrawn from a saved ``results.json`` without rerunning:
+
+    uv run python benchmarks/plots.py docs/benchmark/freeze-1/heldout/results.json
 """
 
 from __future__ import annotations
 
+import argparse
+import json
 import math
 from collections import defaultdict
 from pathlib import Path
@@ -119,6 +126,21 @@ def _grouped(data: dict[str, Any]) -> dict[str, dict[str, list[dict[str, Any]]]]
     return out
 
 
+def provenance(data: dict[str, Any]) -> str:
+    """``tag · commit · seeds``: which frozen code and which seed set a figure shows."""
+    meta = data["meta"]
+    seeds = meta["seeds"]
+    commit = meta.get("git_commit") or "unknown"
+    span = f"{seeds[0]}-{seeds[-1]}" if seeds == list(range(seeds[0], seeds[-1] + 1)) else seeds
+    return f"{meta.get('tag') or 'untagged'} · commit {commit[:12]} · seeds {span} ({len(seeds)})"
+
+
+def _save(fig: Any, data: dict[str, Any], path: Path, dpi: int) -> None:
+    fig.text(0.995, 0.005, provenance(data), fontsize=7, color=MUTED, ha="right", va="bottom")
+    fig.savefig(path, dpi=dpi, facecolor=SURFACE)
+    plt.close(fig)
+
+
 def plot_all(data: dict[str, Any], out: Path) -> None:
     grouped = _grouped(data)
     for scenario, runs in sorted(grouped.items()):
@@ -132,9 +154,8 @@ def plot_all(data: dict[str, Any], out: Path) -> None:
             x=0.01,
             ha="left",
         )
-        fig.tight_layout()
-        fig.savefig(out / f"{scenario}.png", dpi=130, facecolor=SURFACE)
-        plt.close(fig)
+        fig.tight_layout(rect=(0, 0.04, 1, 1))
+        _save(fig, data, out / f"{scenario}.png", 130)
 
     scenarios = sorted(grouped)
     fig, axes = plt.subplots(
@@ -150,9 +171,8 @@ def plot_all(data: dict[str, Any], out: Path) -> None:
         x=0.01,
         ha="left",
     )
-    fig.tight_layout()
-    fig.savefig(out / "overview.png", dpi=110, facecolor=SURFACE)
-    plt.close(fig)
+    fig.tight_layout(rect=(0, 0.03, 1, 1))
+    _save(fig, data, out / "overview.png", 110)
     plot_pareto(data, out)
 
 
@@ -319,6 +339,23 @@ def plot_pareto(data: dict[str, Any], out: Path) -> None:
             frameon=False,
             labelcolor=INK,
         )
-        fig.tight_layout(rect=(0, 0, 1, 0.88))
-        fig.savefig(out / name, dpi=120, facecolor=SURFACE)
-        plt.close(fig)
+        fig.tight_layout(rect=(0, 0.03, 1, 0.88))
+        _save(fig, data, out / name, 120)
+
+
+def main() -> None:
+    parser = argparse.ArgumentParser(description="Redraw the plots from a saved results.json.")
+    parser.add_argument("results", type=Path)
+    parser.add_argument("--out", type=Path, help="default: next to results.json")
+    parser.add_argument("--tag", help="tag to show when results.json does not record one")
+    args = parser.parse_args()
+    data = json.loads(args.results.read_text())
+    if args.tag and not data["meta"].get("tag"):
+        data["meta"]["tag"] = args.tag
+    out = args.out or args.results.parent
+    out.mkdir(parents=True, exist_ok=True)
+    plot_all(data, out)
+
+
+if __name__ == "__main__":
+    main()
