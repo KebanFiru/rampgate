@@ -114,7 +114,7 @@ from rampgate.resources import GiB, KiB, MiB, Number, Resources, TiB
 from rampgate.serialization import UnsupportedSchema, dump_state, load_state
 from rampgate.stability import is_peak_growth, is_stable
 
-__version__ = "0.1.0.dev0"
+__version__ = "0.1.0"
 
 __all__ = [
     "ACTIVE_STATES",

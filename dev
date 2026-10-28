@@ -7,6 +7,8 @@
 #   ./dev zero-deps             verify the core has zero runtime dependencies
 #   ./dev shell [version]       interactive shell with a synced venv
 #   ./dev run <cmd...>          run an arbitrary command in the container
+#   ./dev release-check         build all four distributions, install from the wheels in
+#                               clean venvs, run the README quickstart
 #   ./dev docs                  build the docs site (mkdocs, strict) into site/
 #   ./dev integration [cmd...]  Docker/GPU integration tests, or a command, with the
 #                               Docker socket, --pid=host, --cgroupns=host, --gpus all.
@@ -83,6 +85,9 @@ case "$cmd" in
         ;;
     integration)
         in_integration_container bash scripts/integration.sh "$@"
+        ;;
+    release-check)
+        in_container bash scripts/check_release.sh
         ;;
     docs)
         # Build the docs site strictly into site/ (broken links fail the build).

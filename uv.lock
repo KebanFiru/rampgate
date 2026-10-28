@@ -1893,12 +1893,12 @@ wheels = [
 
 [[package]]
 name = "rampgate"
-version = "0.1.0.dev0"
+version = "0.1.0"
 source = { editable = "packages/rampgate" }
 
 [[package]]
 name = "rampgate-docker"
-version = "0.1.0.dev0"
+version = "0.1.0"
 source = { editable = "packages/rampgate-docker" }
 dependencies = [
     { name = "docker" },
@@ -1913,7 +1913,7 @@ requires-dist = [
 
 [[package]]
 name = "rampgate-nvml"
-version = "0.1.0.dev0"
+version = "0.1.0"
 source = { editable = "packages/rampgate-nvml" }
 dependencies = [
     { name = "nvidia-ml-py" },
@@ -1928,7 +1928,7 @@ requires-dist = [
 
 [[package]]
 name = "rampgate-psutil"
-version = "0.1.0.dev0"
+version = "0.1.0"
 source = { editable = "packages/rampgate-psutil" }
 dependencies = [
     { name = "psutil" },

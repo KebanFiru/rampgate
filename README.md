@@ -15,6 +15,30 @@ All benchmark results are from rampgate's deterministic simulator. Demonstrated 
 
 **Status:** pre-alpha, under construction (phases L0–L3 of [SPEC.md](SPEC.md) done: model, reducer, `decide`, policies, estimators, `Engine` with persistence, and a minimal simulator; L5: the `rampgate-nvml`, `rampgate-psutil` and `rampgate-docker` adapters). L4 gates: failed on the first held-out evaluation (freeze-1, 6 OOMs); met on the second held-out set (freeze-2, seeds 2000–2019) after the fixes listed in Methodology. Not on PyPI yet.
 
+## Quickstart
+
+```sh
+pip install rampgate
+```
+
+```python
+from rampgate import Device, FifoPolicy, Job, MarkStable, Resources, Start
+from rampgate.sim import RampPlateau, Scenario, SimJob, simulate
+
+gpu = Device("gpu0", Resources(vram=24))  # GB here; any unit works
+ramp = RampPlateau(load_s=20, ramp_s=40, plateau=Resources(vram=9), duration_s=300)
+jobs = tuple(SimJob(Job(f"train-{i}", {"gpu0": None}), ramp, submit_at=0) for i in range(3))
+
+trace = simulate(Scenario((gpu,), jobs), FifoPolicy(), max_time=3000)
+for tick in trace.ticks:
+    for action in tick.decision.actions:
+        if isinstance(action, Start | MarkStable):
+            print(f"t={tick.now:5.0f}  {type(action).__name__:10} {action.job_id}")
+print("OOM kills:", trace.world.oom_count, " finished at t =", trace.ticks[-1].now)
+```
+
+Three jobs ramp one at a time (probation) and are reserved at their observed peaks. The third has no history, so it starts in the room that is left, is OOM-killed once (a first-contact OOM), and resumes from its checkpoint once it really fits. With real devices, drive the same `Engine` from your own loop: see [docs/integrating.md](docs/integrating.md) and `examples/docker_gpu_queue.py`.
+
 ## Packages
 
 | Distribution | Purpose |

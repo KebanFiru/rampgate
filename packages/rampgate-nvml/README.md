@@ -2,7 +2,7 @@
 
 NVIDIA GPU probe for rampgate (NVML), with process-to-container mapping.
 
-Part of the [rampgate](../../README.md) monorepo.
+Part of the [rampgate](https://github.com/KebanFiru/rampgate) monorepo.
 
 ```python
 from rampgate_nvml import NvmlProbe, pid_to_container_id

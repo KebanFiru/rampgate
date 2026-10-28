@@ -2,7 +2,7 @@
 
 Host RAM/CPU probe for rampgate (psutil).
 
-Part of the [rampgate](../../README.md) monorepo.
+Part of the [rampgate](https://github.com/KebanFiru/rampgate) monorepo.
 
 ```python
 from rampgate_psutil import HostProbe

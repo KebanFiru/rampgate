@@ -12,7 +12,7 @@ from rampgate_docker.executor import (
 from rampgate_docker.mapper import ContainerUsageMapper, ProcessSample
 from rampgate_docker.watcher import DockerEventWatcher
 
-__version__ = "0.1.0.dev0"
+__version__ = "0.1.0"
 
 __all__ = [
     "ATTEMPT_LABEL",

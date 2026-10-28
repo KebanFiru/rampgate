@@ -1,0 +1,58 @@
+# Tag-driven releases, one distribution per tag, to PyPI with trusted publishing.
+#   rampgate-v0.1.0, rampgate-nvml-v0.1.0, rampgate-psutil-v0.1.0, rampgate-docker-v0.1.0
+# Configure a trusted publisher on PyPI for each project (this workflow, environment "pypi").
+name: release
+
+on:
+  push:
+    tags:
+      - "rampgate-v*"
+      - "rampgate-nvml-v*"
+      - "rampgate-psutil-v*"
+      - "rampgate-docker-v*"
+
+permissions:
+  contents: read
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    outputs:
+      package: ${{ steps.tag.outputs.package }}
+    steps:
+      - uses: actions/checkout@v4
+      - name: Package and version from the tag
+        id: tag
+        run: |
+          tag="${GITHUB_REF_NAME}"
+          package="${tag%-v*}"
+          version="${tag##*-v}"
+          declared="$(sed -n 's/^version = "\(.*\)"/\1/p' "packages/$package/pyproject.toml")"
+          if [[ "$declared" != "$version" ]]; then
+            echo "tag $tag does not match packages/$package version $declared" >&2
+            exit 1
+          fi
+          echo "package=$package" >> "$GITHUB_OUTPUT"
+      - name: Build the dev image
+        run: ./dev build
+      - name: CI and the release check
+        run: ./dev ci && ./dev release-check
+      - name: Build ${{ steps.tag.outputs.package }}
+        run: ./dev run uv build --package "${{ steps.tag.outputs.package }}" --out-dir dist
+      - uses: actions/upload-artifact@v4
+        with:
+          name: dist
+          path: dist/
+
+  publish:
+    needs: build
+    runs-on: ubuntu-latest
+    environment: pypi
+    permissions:
+      id-token: write  # trusted publishing
+    steps:
+      - uses: actions/download-artifact@v4
+        with:
+          name: dist
+          path: dist/
+      - uses: pypa/gh-action-pypi-publish@release/v1

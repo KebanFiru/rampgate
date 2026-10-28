@@ -2,7 +2,7 @@
 
 Docker executor, exit classification and event watcher for rampgate.
 
-Part of the [rampgate](../../README.md) monorepo.
+Part of the [rampgate](https://github.com/KebanFiru/rampgate) monorepo.
 
 ```python
 from rampgate_docker import ContainerSpec, ContainerUsageMapper, DockerEventWatcher, DockerExecutor
