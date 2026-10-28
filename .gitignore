@@ -11,3 +11,6 @@ htmlcov/
 .mypy_cache/
 .ruff_cache/
 .hypothesis/
+
+# real-hardware runs: hog checkpoints are scratch
+docs/real-run/runs/*/ckpt/

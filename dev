@@ -44,6 +44,7 @@ in_integration_container() {
         --pid=host --cgroupns=host \
         -e HYPOTHESIS_PROFILE="${HYPOTHESIS_PROFILE:-ci}" \
         -e RAMPGATE_HOST_ROOT="$ROOT" \
+        -e RAMPGATE_GIT_COMMIT="$(git -C "$ROOT" rev-parse HEAD 2>/dev/null)$([[ -n "$(git -C "$ROOT" status --porcelain 2>/dev/null)" ]] && echo +dirty)" \
         -v /var/run/docker.sock:/var/run/docker.sock \
         -v "$ROOT:/work:Z" \
         -v rampgate-uv-cache:/cache \

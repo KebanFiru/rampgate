@@ -5,6 +5,8 @@ Configured by environment variables (all memory in MiB, all times in seconds):
 - ``HOG_STEPS``: JSON list ``[[t, mib], ...]``: from ``t`` seconds after this
   attempt started, hold ``mib`` MiB (allocated or freed in 64 MiB chunks, at
   most ``HOG_RATE`` MiB/s). Default ``[[0, 512]]``.
+- ``HOG_STEPS_RESUME``: optional, the same for attempts that resume from a
+  checkpoint (``RAMPGATE_RESUME=1``); default: ``HOG_STEPS``.
 - ``HOG_SPIKE``: optional JSON ``{"every_s": 30, "mib": 400, "hold_s": 5}``:
   every ``every_s`` seconds, allocate ``mib`` more for ``hold_s`` seconds, then
   free it again (an end-of-epoch evaluation, or a framework's transient buffers).
@@ -87,8 +89,11 @@ def main() -> int:  # noqa: PLR0915 - one control loop, read top to bottom
     ckpt = Path(os.environ.get("HOG_CKPT_DIR", "/ckpt")) / f"{job}.json"
 
     done = 0.0
-    if os.environ.get("RAMPGATE_RESUME") == "1" and ckpt.exists():
+    resume = os.environ.get("RAMPGATE_RESUME") == "1"
+    if resume and ckpt.exists():
         done = float(json.loads(ckpt.read_text())["done"])
+    if resume and "HOG_STEPS_RESUME" in os.environ:
+        steps = json.loads(os.environ["HOG_STEPS_RESUME"])
     log(event="start", job=job, attempt=attempt, resume_from=done)
 
     stopping = False
