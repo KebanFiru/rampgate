@@ -88,7 +88,7 @@ def _git_commit() -> str:
             ["git", "rev-parse", "HEAD"], capture_output=True, text=True, check=True
         )
         dirty = subprocess.run(
-            ["git", "status", "--porcelain"], capture_output=True, text=True, check=False
+            ["git", "status", "--porcelain", "--untracked-files=no"], capture_output=True, text=True, check=False
         )
         return out.stdout.strip() + ("+dirty" if dirty.stdout.strip() else "")
     except Exception:
