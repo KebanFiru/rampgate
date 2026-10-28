@@ -16,3 +16,5 @@ All benchmark numbers come from rampgate's deterministic simulator. The protocol
 | Freeze 2, development | 0–49 | `docs/benchmark/freeze-2/dev/` |
 
 ![makespan vs OOM kills, freeze 2](benchmark/freeze-2/heldout/pareto_ooms.png)
+
+Proof that the deadlock fix and the L6 changes leave every benchmark run unchanged: `docs/benchmark/determinism-l6.md`.
