@@ -1,15 +1,19 @@
 #!/usr/bin/env bash
 # Run the dev/CI toolchain inside Docker; nothing is installed on the host.
 #
-#   ./dev build                 build the dev image
+#   ./dev build                 build the dev image and the GPU memory-hog image
 #   ./dev ci [3.11|3.12|3.13|all]   lint, type-check and test (default: all;
 #                               "all" also runs the zero-dependency check)
 #   ./dev zero-deps             verify the core has zero runtime dependencies
 #   ./dev shell [version]       interactive shell with a synced venv
 #   ./dev run <cmd...>          run an arbitrary command in the container
+#   ./dev integration [cmd...]  Docker/GPU integration tests, or a command, with the
+#                               Docker socket, --pid=host, --cgroupns=host, --gpus all.
+#                               The socket is root-equivalent: integration only, never ci.
 set -euo pipefail
 
 IMAGE=rampgate-dev:latest
+HOG_IMAGE=rampgate-hog:dev
 ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 
 in_container() {
@@ -23,12 +27,36 @@ in_container() {
         "$IMAGE" "$@"
 }
 
+# Integration only: the Docker socket gives root-equivalent access to the host; the
+# host PID and cgroup namespaces let NVML pids be mapped to containers. On SELinux,
+# reaching the socket did not need --security-opt label=disable (Fedora 43, enforcing);
+# set RAMPGATE_LABEL_DISABLE=1 if your policy denies it.
+in_integration_container() {
+    local tty=() extra=()
+    [[ -t 0 && -t 1 ]] && tty=(-it)
+    [[ "${RAMPGATE_LABEL_DISABLE:-0}" == 1 ]] && extra+=(--security-opt label=disable)
+    if [[ -x "$(command -v nvidia-smi)" ]] && nvidia-smi -L >/dev/null 2>&1; then
+        extra+=(--gpus all)
+    fi
+    docker run --rm "${tty[@]}" "${extra[@]}" \
+        --user "$(id -u):$(id -g)" \
+        --group-add "$(stat -c %g /var/run/docker.sock)" \
+        --pid=host --cgroupns=host \
+        -e HYPOTHESIS_PROFILE="${HYPOTHESIS_PROFILE:-ci}" \
+        -e RAMPGATE_HOST_ROOT="$ROOT" \
+        -v /var/run/docker.sock:/var/run/docker.sock \
+        -v "$ROOT:/work:Z" \
+        -v rampgate-uv-cache:/cache \
+        "$IMAGE" "$@"
+}
+
 cmd="${1:-ci}"
 shift || true
 
 case "$cmd" in
     build)
         docker build -f "$ROOT/docker/dev.Dockerfile" -t "$IMAGE" "$ROOT/docker"
+        docker build -t "$HOG_IMAGE" "$ROOT/docker/hog"
         ;;
     ci)
         versions=("${1:-all}")
@@ -50,6 +78,9 @@ case "$cmd" in
         ;;
     run)
         in_container "$@"
+        ;;
+    integration)
+        in_integration_container bash scripts/integration.sh "$@"
         ;;
     *)
         echo "unknown command: $cmd" >&2
