@@ -1,0 +1,46 @@
+{
+  "name": "staged",
+  "staged": true,
+  "description": "One run that stages the three L5 gates through inputs only (hog profiles, submit condition, pre-filled history). Memory in MiB on a 6141 MiB GPU; NVML adds ~80 MiB of CUDA context per process and ~380 MiB of driver/foreign usage.",
+  "staging": {
+    "probation": "X and Y are both untrusted (no history) and submitted at t=0: Y must wait while X warms.",
+    "rule_v": "X peaks once (a 4 s burst to 2304 MiB at 20 s) and then holds 1536 MiB, so its reservation keeps the old peak. Y holds 1280 MiB, becomes STABLE, then grows to 3584 MiB at 100 s of its first attempt: U = X's peak + Y's peak + F exceeds C x 0.98 while the physical sum stays below C.",
+    "oom": "A has a pre-filled history: 3 complete records of 1282 MiB for its template, so its estimate is trusted and too low. It is submitted when Y's second attempt is STABLE, admitted next to Y, then grows to 2560 MiB at 40 s. Y (resumed: 3328 MiB) keeps allocating and freeing 128 MiB every 6 s, as frameworks do, so either process's allocation can be the one that fails.",
+    "measured_question": "On the real OOM: which container dies, how classify_exit labels it, whose estimate Rule O grows."
+  },
+  "max_time": 1500,
+  "history": [
+    {"key": "tmpl-a", "peak_mib": 1282, "records": 3}
+  ],
+  "jobs": [
+    {
+      "id": "X",
+      "fingerprint": ["tmpl-x"],
+      "submit_at": 0,
+      "env": {
+        "HOG_STEPS": [[0, 1536], [20, 2304], [24, 1536]],
+        "HOG_DURATION": "300"
+      }
+    },
+    {
+      "id": "Y",
+      "fingerprint": ["tmpl-y"],
+      "submit_at": 0,
+      "env": {
+        "HOG_STEPS": [[0, 1280], [100, 3584]],
+        "HOG_STEPS_RESUME": [[0, 3328]],
+        "HOG_SPIKE": {"every_s": 6, "mib": 128, "hold_s": 3},
+        "HOG_DURATION": "420"
+      }
+    },
+    {
+      "id": "A",
+      "fingerprint": ["tmpl-a"],
+      "submit_when": {"job": "Y", "state": "STABLE", "min_attempt": 2},
+      "env": {
+        "HOG_STEPS": [[0, 1200], [40, 2560]],
+        "HOG_DURATION": "150"
+      }
+    }
+  ]
+}
