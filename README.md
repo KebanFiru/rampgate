@@ -11,18 +11,18 @@ rampgate is an **observation-based admission scheduler** packaged as a small, em
 
 **The trade-off (simulated, held-out set 2).** Safety is not free; rampgate makes it cheaper than the alternatives. In the six simulated scenarios it has no OOMs except a few first-contact ones (a median of 0–1 per run, all in cold runs), and it finishes in 0.12–0.75× the makespan of `Serial`, the other strategy that is always OOM-free. The price is makespan: against `GreedyFree`, which OOMs hundreds of times per run in five of the six scenarios, warm rampgate takes 1.07–1.59× as long. It misses its own ≤ 1.2× target in four of six. In the TrainQ-like scenario (e) no strategy OOMs, so rampgate's 1.13–1.20× makespan buys nothing there; this scenario likely has too little memory pressure. See [the price of safety](#summary-the-price-of-safety).
 
-All results are from rampgate's deterministic simulator; nothing has been validated on real GPUs yet (planned in L5).
+All benchmark results are from rampgate's deterministic simulator. Demonstrated (not benchmarked) on one laptop GPU (RTX 4050, 6 GB) with synthetic memory-hog containers: probation, a Rule V vacate and an OOM→Rule O cycle, checked by script. Not yet tested: multiple GPUs, gang jobs, CPU devices, a real framework's caching allocator, orchestrator restart, sub-second spikes. See [docs/real-run/assumptions.md](docs/real-run/assumptions.md) for what the real runs confirmed and contradicted.
 
-**Status:** pre-alpha, under construction (phases L0–L3 of [SPEC.md](SPEC.md) done: model, reducer, `decide`, policies, estimators, `Engine` with persistence, and a minimal simulator). L4 gates: failed on the first held-out evaluation (freeze-1, 6 OOMs); met on the second held-out set (freeze-2, seeds 2000–2019) after the fixes listed in Methodology. Not on PyPI yet.
+**Status:** pre-alpha, under construction (phases L0–L3 of [SPEC.md](SPEC.md) done: model, reducer, `decide`, policies, estimators, `Engine` with persistence, and a minimal simulator; L5: the `rampgate-nvml`, `rampgate-psutil` and `rampgate-docker` adapters). L4 gates: failed on the first held-out evaluation (freeze-1, 6 OOMs); met on the second held-out set (freeze-2, seeds 2000–2019) after the fixes listed in Methodology. Not on PyPI yet.
 
 ## Packages
 
 | Distribution | Purpose |
 |---|---|
 | `rampgate` | Core: model, reducer, decide, policies, estimators, Engine, simulator. Stdlib only. |
-| `rampgate-nvml` | NVIDIA GPU probe (planned) |
-| `rampgate-psutil` | Host RAM/CPU probe (planned) |
-| `rampgate-docker` | Docker executor and event watcher (planned) |
+| `rampgate-nvml` | NVIDIA GPU probe; process → container mapping via `/proc/<pid>/cgroup` |
+| `rampgate-psutil` | Host RAM/CPU probe; process-tree usage |
+| `rampgate-docker` | Docker executor, exit classification, event watcher, usage mapper |
 
 ## Benchmark
 
