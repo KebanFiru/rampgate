@@ -1,0 +1,43 @@
+site_name: rampgate
+site_description: Observation-based admission scheduler for jobs that ramp up their memory
+repo_name: rampgate
+docs_dir: docs
+strict: true
+theme:
+  name: material
+  features:
+    - navigation.sections
+    - content.code.copy
+  palette:
+    - media: "(prefers-color-scheme: light)"
+      scheme: default
+      toggle: {icon: material/weather-night, name: Dark mode}
+    - media: "(prefers-color-scheme: dark)"
+      scheme: slate
+      toggle: {icon: material/weather-sunny, name: Light mode}
+markdown_extensions:
+  - admonition
+  - tables
+  - toc: {permalink: true}
+  - pymdownx.highlight
+  - pymdownx.superfences:
+      custom_fences:
+        - name: mermaid
+          class: mermaid
+          format: !!python/name:pymdownx.superfences.fence_code_format
+nav:
+  - Home: index.md
+  - Concepts: concepts.md
+  - Algorithm: algorithm.md
+  - Policies: policies.md
+  - Estimators: estimators.md
+  - Adapters: adapters.md
+  - Simulator: simulator.md
+  - Integrating rampgate: integrating.md
+  - Restarts and reconciliation: reconciliation.md
+  - Benchmark: benchmark.md
+  - Real hardware: real-run/assumptions.md
+  - Prior art: prior-art.md
+not_in_nav: |
+  benchmark/**
+  real-run/runs/**

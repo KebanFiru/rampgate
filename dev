@@ -7,6 +7,7 @@
 #   ./dev zero-deps             verify the core has zero runtime dependencies
 #   ./dev shell [version]       interactive shell with a synced venv
 #   ./dev run <cmd...>          run an arbitrary command in the container
+#   ./dev docs                  build the docs site (mkdocs, strict) into site/
 #   ./dev integration [cmd...]  Docker/GPU integration tests, or a command, with the
 #                               Docker socket, --pid=host, --cgroupns=host, --gpus all.
 #                               The socket is root-equivalent: integration only, never ci.
@@ -82,6 +83,12 @@ case "$cmd" in
         ;;
     integration)
         in_integration_container bash scripts/integration.sh "$@"
+        ;;
+    docs)
+        # Build the docs site strictly into site/ (broken links fail the build).
+        in_container bash -c "export UV_PROJECT_ENVIRONMENT=/tmp/venv-docs; \
+            uv sync --all-packages --python 3.13 --group docs --locked -q && \
+            uv run --no-sync mkdocs build --strict --site-dir site"
         ;;
     *)
         echo "unknown command: $cmd" >&2

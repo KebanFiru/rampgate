@@ -21,6 +21,10 @@ dev = [
 bench = [
     "matplotlib>=3.8",
 ]
+# The docs site (mkdocs.yml); not synced by default.
+docs = [
+    "mkdocs-material>=9.5",
+]
 
 [tool.ruff]
 line-length = 100
