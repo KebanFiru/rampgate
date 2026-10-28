@@ -39,12 +39,11 @@ from typing import Any
 
 from rampgate import (
     Config,
-    DeviceObserved,
     Engine,
     HistoryEstimator,
     InMemoryHistoryStore,
     JobExited,
-    JobObserved,
+    JobSample,
     Resources,
     Start,
     __version__,
@@ -251,11 +250,18 @@ def main(argv: list[str] | None = None) -> int:  # noqa: PLR0915 - the loop, top
                 },
                 t=now,
             )
-            # Jobs first: rampgate infers foreign usage at a DeviceObserved from the jobs'
-            # latest usage, so the device total must not be paired with older job samples.
-            for event2 in [*job_obs, *observed]:
-                assert isinstance(event2, DeviceObserved | JobObserved)
-                engine.observe(event2)
+            # One atomic sample per device: the jobs' usage, then the device total.
+            for obs in observed:
+                engine.observe_sample(
+                    obs.device_id,
+                    now,
+                    obs.used_total,
+                    {
+                        o.job_id: JobSample(o.attempt, o.usage)
+                        for o in job_obs
+                        if o.device_id == obs.device_id
+                    },
+                )
 
             for jid in [j for j, spec in pending.items() if _submission_due(spec, now, engine)]:
                 del pending[jid]
