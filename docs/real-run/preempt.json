@@ -1,0 +1,447 @@
+{
+ "poll_s": 0.02,
+ "samples": [
+  {
+   "size_mib": 1024,
+   "ckpt_save_s": 2.0,
+   "baseline_used_mib": 409.8125,
+   "nvml_process_mib_at_full": 1106.0,
+   "context_overhead_mib": 82.0,
+   "create_to_started_s": 0.244,
+   "create_to_nvml_visible_s": 0.468,
+   "create_to_full_allocation_s": 0.676,
+   "sigterm_to_exit_s": 2.23,
+   "sigterm_to_nvml_process_gone_s": 2.135,
+   "sigterm_to_memory_freed_s": 2.136,
+   "exit_code": 143,
+   "repeat": 0
+  },
+  {
+   "size_mib": 1024,
+   "ckpt_save_s": 2.0,
+   "baseline_used_mib": 409.8125,
+   "nvml_process_mib_at_full": 1106.0,
+   "context_overhead_mib": 82.0,
+   "create_to_started_s": 0.216,
+   "create_to_nvml_visible_s": 0.364,
+   "create_to_full_allocation_s": 0.549,
+   "sigterm_to_exit_s": 2.257,
+   "sigterm_to_nvml_process_gone_s": 2.164,
+   "sigterm_to_memory_freed_s": 2.164,
+   "exit_code": 143,
+   "repeat": 1
+  },
+  {
+   "size_mib": 1024,
+   "ckpt_save_s": 2.0,
+   "baseline_used_mib": 409.8125,
+   "nvml_process_mib_at_full": 1106.0,
+   "context_overhead_mib": 82.0,
+   "create_to_started_s": 0.198,
+   "create_to_nvml_visible_s": 0.401,
+   "create_to_full_allocation_s": 0.584,
+   "sigterm_to_exit_s": 2.267,
+   "sigterm_to_nvml_process_gone_s": 2.147,
+   "sigterm_to_memory_freed_s": 2.148,
+   "exit_code": 143,
+   "repeat": 2
+  },
+  {
+   "size_mib": 1024,
+   "ckpt_save_s": 2.0,
+   "baseline_used_mib": 409.8125,
+   "nvml_process_mib_at_full": 1106.0,
+   "context_overhead_mib": 82.0,
+   "create_to_started_s": 0.206,
+   "create_to_nvml_visible_s": 0.417,
+   "create_to_full_allocation_s": 0.603,
+   "sigterm_to_exit_s": 2.243,
+   "sigterm_to_nvml_process_gone_s": 2.139,
+   "sigterm_to_memory_freed_s": 2.139,
+   "exit_code": 143,
+   "repeat": 3
+  },
+  {
+   "size_mib": 1024,
+   "ckpt_save_s": 2.0,
+   "baseline_used_mib": 409.8125,
+   "nvml_process_mib_at_full": 1106.0,
+   "context_overhead_mib": 82.0,
+   "create_to_started_s": 0.169,
+   "create_to_nvml_visible_s": 0.35,
+   "create_to_full_allocation_s": 0.558,
+   "sigterm_to_exit_s": 2.258,
+   "sigterm_to_nvml_process_gone_s": 2.158,
+   "sigterm_to_memory_freed_s": 2.158,
+   "exit_code": 143,
+   "repeat": 4
+  },
+  {
+   "size_mib": 3072,
+   "ckpt_save_s": 2.0,
+   "baseline_used_mib": 409.8125,
+   "nvml_process_mib_at_full": 3154.0,
+   "context_overhead_mib": 82.0,
+   "create_to_started_s": 0.205,
+   "create_to_nvml_visible_s": 0.359,
+   "create_to_full_allocation_s": 0.79,
+   "sigterm_to_exit_s": 2.25,
+   "sigterm_to_nvml_process_gone_s": 2.155,
+   "sigterm_to_memory_freed_s": 2.155,
+   "exit_code": 143,
+   "repeat": 0
+  },
+  {
+   "size_mib": 3072,
+   "ckpt_save_s": 2.0,
+   "baseline_used_mib": 409.8125,
+   "nvml_process_mib_at_full": 3154.0,
+   "context_overhead_mib": 82.0,
+   "create_to_started_s": 0.164,
+   "create_to_nvml_visible_s": 0.319,
+   "create_to_full_allocation_s": 0.772,
+   "sigterm_to_exit_s": 2.344,
+   "sigterm_to_nvml_process_gone_s": 2.195,
+   "sigterm_to_memory_freed_s": 2.195,
+   "exit_code": 143,
+   "repeat": 1
+  },
+  {
+   "size_mib": 3072,
+   "ckpt_save_s": 2.0,
+   "baseline_used_mib": 409.8125,
+   "nvml_process_mib_at_full": 3154.0,
+   "context_overhead_mib": 82.0,
+   "create_to_started_s": 0.206,
+   "create_to_nvml_visible_s": 0.41,
+   "create_to_full_allocation_s": 0.842,
+   "sigterm_to_exit_s": 2.284,
+   "sigterm_to_nvml_process_gone_s": 2.188,
+   "sigterm_to_memory_freed_s": 2.188,
+   "exit_code": 143,
+   "repeat": 2
+  },
+  {
+   "size_mib": 3072,
+   "ckpt_save_s": 2.0,
+   "baseline_used_mib": 409.8125,
+   "nvml_process_mib_at_full": 3154.0,
+   "context_overhead_mib": 82.0,
+   "create_to_started_s": 0.169,
+   "create_to_nvml_visible_s": 0.375,
+   "create_to_full_allocation_s": 0.823,
+   "sigterm_to_exit_s": 2.264,
+   "sigterm_to_nvml_process_gone_s": 2.119,
+   "sigterm_to_memory_freed_s": 2.119,
+   "exit_code": 143,
+   "repeat": 3
+  },
+  {
+   "size_mib": 3072,
+   "ckpt_save_s": 2.0,
+   "baseline_used_mib": 409.8125,
+   "nvml_process_mib_at_full": 3154.0,
+   "context_overhead_mib": 82.0,
+   "create_to_started_s": 0.2,
+   "create_to_nvml_visible_s": 0.384,
+   "create_to_full_allocation_s": 0.834,
+   "sigterm_to_exit_s": 2.223,
+   "sigterm_to_nvml_process_gone_s": 2.116,
+   "sigterm_to_memory_freed_s": 2.116,
+   "exit_code": 143,
+   "repeat": 4
+  },
+  {
+   "size_mib": 1024,
+   "ckpt_save_s": 0.0,
+   "baseline_used_mib": 409.8125,
+   "nvml_process_mib_at_full": 1106.0,
+   "context_overhead_mib": 82.0,
+   "create_to_started_s": 0.199,
+   "create_to_nvml_visible_s": 0.345,
+   "create_to_full_allocation_s": 0.529,
+   "sigterm_to_exit_s": 0.237,
+   "sigterm_to_nvml_process_gone_s": 0.148,
+   "sigterm_to_memory_freed_s": 0.148,
+   "exit_code": 143,
+   "repeat": 0
+  },
+  {
+   "size_mib": 1024,
+   "ckpt_save_s": 0.0,
+   "baseline_used_mib": 409.8125,
+   "nvml_process_mib_at_full": 1106.0,
+   "context_overhead_mib": 82.0,
+   "create_to_started_s": 0.195,
+   "create_to_nvml_visible_s": 0.376,
+   "create_to_full_allocation_s": 0.583,
+   "sigterm_to_exit_s": 0.22,
+   "sigterm_to_nvml_process_gone_s": 0.122,
+   "sigterm_to_memory_freed_s": 0.122,
+   "exit_code": 143,
+   "repeat": 1
+  },
+  {
+   "size_mib": 1024,
+   "ckpt_save_s": 0.0,
+   "baseline_used_mib": 409.8125,
+   "nvml_process_mib_at_full": 1106.0,
+   "context_overhead_mib": 82.0,
+   "create_to_started_s": 0.207,
+   "create_to_nvml_visible_s": 0.415,
+   "create_to_full_allocation_s": 0.6,
+   "sigterm_to_exit_s": 0.232,
+   "sigterm_to_nvml_process_gone_s": 0.133,
+   "sigterm_to_memory_freed_s": 0.133,
+   "exit_code": 143,
+   "repeat": 2
+  },
+  {
+   "size_mib": 1024,
+   "ckpt_save_s": 0.0,
+   "baseline_used_mib": 409.8125,
+   "nvml_process_mib_at_full": 1106.0,
+   "context_overhead_mib": 82.0,
+   "create_to_started_s": 0.199,
+   "create_to_nvml_visible_s": 0.346,
+   "create_to_full_allocation_s": 0.532,
+   "sigterm_to_exit_s": 0.25,
+   "sigterm_to_nvml_process_gone_s": 0.148,
+   "sigterm_to_memory_freed_s": 0.148,
+   "exit_code": 143,
+   "repeat": 3
+  },
+  {
+   "size_mib": 1024,
+   "ckpt_save_s": 0.0,
+   "baseline_used_mib": 409.8125,
+   "nvml_process_mib_at_full": 1106.0,
+   "context_overhead_mib": 82.0,
+   "create_to_started_s": 0.21,
+   "create_to_nvml_visible_s": 0.355,
+   "create_to_full_allocation_s": 0.543,
+   "sigterm_to_exit_s": 0.236,
+   "sigterm_to_nvml_process_gone_s": 0.138,
+   "sigterm_to_memory_freed_s": 0.138,
+   "exit_code": 143,
+   "repeat": 4
+  },
+  {
+   "size_mib": 3072,
+   "ckpt_save_s": 0.0,
+   "baseline_used_mib": 409.8125,
+   "nvml_process_mib_at_full": 3154.0,
+   "context_overhead_mib": 82.0,
+   "create_to_started_s": 0.2,
+   "create_to_nvml_visible_s": 0.346,
+   "create_to_full_allocation_s": 0.781,
+   "sigterm_to_exit_s": 0.225,
+   "sigterm_to_nvml_process_gone_s": 0.142,
+   "sigterm_to_memory_freed_s": 0.142,
+   "exit_code": 143,
+   "repeat": 0
+  },
+  {
+   "size_mib": 3072,
+   "ckpt_save_s": 0.0,
+   "baseline_used_mib": 409.8125,
+   "nvml_process_mib_at_full": 3154.0,
+   "context_overhead_mib": 82.0,
+   "create_to_started_s": 0.201,
+   "create_to_nvml_visible_s": 0.348,
+   "create_to_full_allocation_s": 0.778,
+   "sigterm_to_exit_s": 0.247,
+   "sigterm_to_nvml_process_gone_s": 0.15,
+   "sigterm_to_memory_freed_s": 0.15,
+   "exit_code": 143,
+   "repeat": 1
+  },
+  {
+   "size_mib": 3072,
+   "ckpt_save_s": 0.0,
+   "baseline_used_mib": 409.8125,
+   "nvml_process_mib_at_full": 3154.0,
+   "context_overhead_mib": 82.0,
+   "create_to_started_s": 0.165,
+   "create_to_nvml_visible_s": 0.312,
+   "create_to_full_allocation_s": 0.763,
+   "sigterm_to_exit_s": 0.225,
+   "sigterm_to_nvml_process_gone_s": 0.123,
+   "sigterm_to_memory_freed_s": 0.124,
+   "exit_code": 143,
+   "repeat": 2
+  },
+  {
+   "size_mib": 3072,
+   "ckpt_save_s": 0.0,
+   "baseline_used_mib": 409.8125,
+   "nvml_process_mib_at_full": 3154.0,
+   "context_overhead_mib": 82.0,
+   "create_to_started_s": 0.215,
+   "create_to_nvml_visible_s": 0.362,
+   "create_to_full_allocation_s": 0.813,
+   "sigterm_to_exit_s": 0.251,
+   "sigterm_to_nvml_process_gone_s": 0.156,
+   "sigterm_to_memory_freed_s": 0.156,
+   "exit_code": 143,
+   "repeat": 3
+  },
+  {
+   "size_mib": 3072,
+   "ckpt_save_s": 0.0,
+   "baseline_used_mib": 409.8125,
+   "nvml_process_mib_at_full": 3154.0,
+   "context_overhead_mib": 82.0,
+   "create_to_started_s": 0.169,
+   "create_to_nvml_visible_s": 0.315,
+   "create_to_full_allocation_s": 0.745,
+   "sigterm_to_exit_s": 0.273,
+   "sigterm_to_nvml_process_gone_s": 0.179,
+   "sigterm_to_memory_freed_s": 0.179,
+   "exit_code": 143,
+   "repeat": 4
+  }
+ ],
+ "summary": [
+  {
+   "size_mib": 1024,
+   "ckpt_save_s": 2.0,
+   "n": 5,
+   "create_to_nvml_visible_s": {
+    "median": 0.401,
+    "min": 0.35,
+    "max": 0.468
+   },
+   "create_to_full_allocation_s": {
+    "median": 0.584,
+    "min": 0.549,
+    "max": 0.676
+   },
+   "sigterm_to_exit_s": {
+    "median": 2.257,
+    "min": 2.23,
+    "max": 2.267
+   },
+   "sigterm_to_nvml_process_gone_s": {
+    "median": 2.147,
+    "min": 2.135,
+    "max": 2.164
+   },
+   "sigterm_to_memory_freed_s": {
+    "median": 2.148,
+    "min": 2.136,
+    "max": 2.164
+   },
+   "context_overhead_mib": {
+    "median": 82.0,
+    "min": 82.0,
+    "max": 82.0
+   }
+  },
+  {
+   "size_mib": 3072,
+   "ckpt_save_s": 2.0,
+   "n": 5,
+   "create_to_nvml_visible_s": {
+    "median": 0.375,
+    "min": 0.319,
+    "max": 0.41
+   },
+   "create_to_full_allocation_s": {
+    "median": 0.823,
+    "min": 0.772,
+    "max": 0.842
+   },
+   "sigterm_to_exit_s": {
+    "median": 2.264,
+    "min": 2.223,
+    "max": 2.344
+   },
+   "sigterm_to_nvml_process_gone_s": {
+    "median": 2.155,
+    "min": 2.116,
+    "max": 2.195
+   },
+   "sigterm_to_memory_freed_s": {
+    "median": 2.155,
+    "min": 2.116,
+    "max": 2.195
+   },
+   "context_overhead_mib": {
+    "median": 82.0,
+    "min": 82.0,
+    "max": 82.0
+   }
+  },
+  {
+   "size_mib": 1024,
+   "ckpt_save_s": 0.0,
+   "n": 5,
+   "create_to_nvml_visible_s": {
+    "median": 0.355,
+    "min": 0.345,
+    "max": 0.415
+   },
+   "create_to_full_allocation_s": {
+    "median": 0.543,
+    "min": 0.529,
+    "max": 0.6
+   },
+   "sigterm_to_exit_s": {
+    "median": 0.236,
+    "min": 0.22,
+    "max": 0.25
+   },
+   "sigterm_to_nvml_process_gone_s": {
+    "median": 0.138,
+    "min": 0.122,
+    "max": 0.148
+   },
+   "sigterm_to_memory_freed_s": {
+    "median": 0.138,
+    "min": 0.122,
+    "max": 0.148
+   },
+   "context_overhead_mib": {
+    "median": 82.0,
+    "min": 82.0,
+    "max": 82.0
+   }
+  },
+  {
+   "size_mib": 3072,
+   "ckpt_save_s": 0.0,
+   "n": 5,
+   "create_to_nvml_visible_s": {
+    "median": 0.346,
+    "min": 0.312,
+    "max": 0.362
+   },
+   "create_to_full_allocation_s": {
+    "median": 0.778,
+    "min": 0.745,
+    "max": 0.813
+   },
+   "sigterm_to_exit_s": {
+    "median": 0.247,
+    "min": 0.225,
+    "max": 0.273
+   },
+   "sigterm_to_nvml_process_gone_s": {
+    "median": 0.15,
+    "min": 0.123,
+    "max": 0.179
+   },
+   "sigterm_to_memory_freed_s": {
+    "median": 0.15,
+    "min": 0.124,
+    "max": 0.179
+   },
+   "context_overhead_mib": {
+    "median": 82.0,
+    "min": 82.0,
+    "max": 82.0
+   }
+  }
+ ]
+}

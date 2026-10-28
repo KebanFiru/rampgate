@@ -1,0 +1,38 @@
+{
+  "name": "unstaged",
+  "staged": false,
+  "description": "A realistic mix with nothing staged: four hogs of mixed sizes, all submitted at t=0, no pre-filled history. One has an end-of-epoch evaluation spike. Whatever happens is recorded, even if no rule fires.",
+  "max_time": 1800,
+  "history": [],
+  "jobs": [
+    {
+      "id": "u1-small",
+      "fingerprint": ["tmpl-small"],
+      "submit_at": 0,
+      "env": {"HOG_STEPS": [[0, 768]], "HOG_RATE": "128", "HOG_DURATION": "180"}
+    },
+    {
+      "id": "u2-eval",
+      "fingerprint": ["tmpl-eval"],
+      "submit_at": 0,
+      "env": {
+        "HOG_STEPS": [[0, 1536]],
+        "HOG_RATE": "128",
+        "HOG_SPIKE": {"every_s": 60, "mib": 512, "hold_s": 8},
+        "HOG_DURATION": "240"
+      }
+    },
+    {
+      "id": "u3-medium",
+      "fingerprint": ["tmpl-medium"],
+      "submit_at": 0,
+      "env": {"HOG_STEPS": [[0, 2304]], "HOG_DURATION": "200"}
+    },
+    {
+      "id": "u4-large",
+      "fingerprint": ["tmpl-large"],
+      "submit_at": 0,
+      "env": {"HOG_STEPS": [[0, 3072]], "HOG_DURATION": "150"}
+    }
+  ]
+}
