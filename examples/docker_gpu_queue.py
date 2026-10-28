@@ -251,7 +251,9 @@ def main(argv: list[str] | None = None) -> int:  # noqa: PLR0915 - the loop, top
                 },
                 t=now,
             )
-            for event2 in [*observed, *job_obs]:
+            # Jobs first: rampgate infers foreign usage at a DeviceObserved from the jobs'
+            # latest usage, so the device total must not be paired with older job samples.
+            for event2 in [*job_obs, *observed]:
                 assert isinstance(event2, DeviceObserved | JobObserved)
                 engine.observe(event2)
 
