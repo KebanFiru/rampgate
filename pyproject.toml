@@ -46,8 +46,9 @@ files = ["packages/rampgate/src", "packages/rampgate-nvml/src", "packages/rampga
 
 [tool.pytest.ini_options]
 addopts = "--import-mode=importlib"
-pythonpath = ["packages/rampgate/tests"]
+pythonpath = ["packages/rampgate/tests", "packages/rampgate-docker/tests"]
 testpaths = ["packages"]
+markers = ["docker: needs a Docker daemon (./dev integration); skipped without one"]
 
 [tool.coverage.run]
 source = ["rampgate"]
