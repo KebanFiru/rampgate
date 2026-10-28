@@ -70,6 +70,14 @@ def test_devices_have_total_memory_as_capacity() -> None:
     assert [d.id for d in devices] == ["gpu0", "gpu1"]
     assert devices[0].capacity == Resources(vram=6144)
     assert devices[1].capacity == Resources(vram=8192)
+    assert devices[0].stable_min_usage == Resources(vram=256)  # the Rule S usage floor
+
+
+def test_usage_floor_in_the_probes_unit_and_off() -> None:
+    (gpu,) = NvmlProbe({0: "gpu0"}, unit="GiB", nvml=_fake()).devices()
+    assert gpu.stable_min_usage == Resources(vram=0.25)
+    (off,) = NvmlProbe({0: "gpu0"}, stable_min_usage_mib=0, nvml=_fake()).devices()
+    assert off.stable_min_usage == Resources()
 
 
 def test_sample_reports_device_totals_and_compute_processes() -> None:

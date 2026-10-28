@@ -134,6 +134,7 @@ class NvmlProbe:
         *,
         unit: str = "bytes",
         include_graphics: bool = False,
+        stable_min_usage_mib: float = 256.0,
         nvml: NvmlApi | None = None,
     ) -> None:
         if not index_to_device_id:
@@ -145,6 +146,7 @@ class NvmlProbe:
         self.dim = dim
         self.unit = unit
         self.include_graphics = include_graphics
+        self.stable_min_usage_mib = stable_min_usage_mib
         self._handles = {
             device_id: self._nvml.nvmlDeviceGetHandleByIndex(index)
             for index, device_id in index_to_device_id.items()
@@ -160,9 +162,20 @@ class NvmlProbe:
         self.close()
 
     def devices(self) -> list[Device]:
-        """Every probed GPU as a `Device` whose capacity is its total memory."""
+        """Every probed GPU as a `Device` whose capacity is its total memory.
+
+        Its ``stable_min_usage`` (Rule S usage floor) is ``stable_min_usage_mib``
+        (default 256 MiB, in this probe's unit): a CUDA context alone was measured at
+        about 82 MiB on the L5 hardware, so a job below the floor has not started
+        using the GPU yet. ``stable_min_usage_mib=0`` turns the floor off.
+        """
+        floor = self._resources(int(self.stable_min_usage_mib * MEMORY_UNITS["MiB"]))
         return [
-            Device(device_id, self._resources(self._nvml.nvmlDeviceGetMemoryInfo(handle).total))
+            Device(
+                device_id,
+                self._resources(self._nvml.nvmlDeviceGetMemoryInfo(handle).total),
+                stable_min_usage=floor,
+            )
             for device_id, handle in self._handles.items()
         ]
 
