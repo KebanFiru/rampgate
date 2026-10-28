@@ -78,15 +78,27 @@ class StopReason(StrEnum):
 
 @dataclass(frozen=True, slots=True)
 class Device:
+    """A device rampgate admits jobs onto.
+
+    ``stable_min_usage`` is the Rule S usage floor (SPEC §5): a job that reports no
+    steps becomes STABLE on this device only after its usage here exceeded the floor
+    in some dimension. Off (``Resources()``) by default, because rampgate does not know
+    the device's units; ``rampgate_nvml.NvmlProbe`` sets 256 MiB of ``vram``. Without
+    that adapter, set it yourself (a CUDA context alone was measured at ~82 MiB).
+    """
+
     id: DeviceId
     capacity: Resources
     labels: Mapping[str, str] = field(default_factory=frozen_map)
+    stable_min_usage: Resources = field(default_factory=Resources)
 
     def __post_init__(self) -> None:
         if not isinstance(self.id, str) or not self.id:
             raise ValueError("Device.id must be a non-empty string")
         if not isinstance(self.capacity, Resources):
             raise TypeError("Device.capacity must be a Resources")
+        if not isinstance(self.stable_min_usage, Resources):
+            raise TypeError("Device.stable_min_usage must be a Resources")
         object.__setattr__(self, "labels", frozen_map(self.labels))
 
 
@@ -208,6 +220,9 @@ class JobRuntime:
     # Isolation retry (SPEC §5): set when the job OOMed before it was stable, cleared at
     # MarkStable; the order of that OOM, so the oldest one holds a device.
     isolate_seq: int | None = None
+    # Per device, its sample counter (DeviceState.samples) when this attempt was last
+    # observed there, or when it started.
+    obs_sample: Mapping[DeviceId, int] = field(default_factory=frozen_map)
 
     @property
     def id(self) -> JobId:
@@ -248,6 +263,9 @@ class DeviceState:
     used_total: Resources | None = None
     last_obs_t: float | None = None
     foreign_samples: tuple[tuple[float, Resources], ...] = ()
+    # Applied DeviceObserved samples; a job not observed for missing_samples_warn of
+    # them is warned about (JobNotObserved).
+    samples: int = 0
 
     @property
     def capacity(self) -> Resources:

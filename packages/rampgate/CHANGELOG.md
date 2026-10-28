@@ -6,6 +6,11 @@
 - An isolation hold on a device takes precedence over head-of-line holds there: under `FifoPolicy(strict=True)` or `PriorityPolicy`, a job queued ahead of an isolation retry and kept out by its hold no longer closes the device for the holder (a mutual hold that left both PENDING forever). Found by hypothesis in CI after held-out evaluation 2; the benchmark's policies were not affected. New liveness invariant I20.
 
 ### Added
+- `Engine.observe_sample(device_id, t, used_total, per_job)` and `JobSample`: one device sample applied atomically, the jobs' usage before the device total, so a growing job's growth is never counted as foreign (the L5 harness bug). `observe` documents the ordering requirement. A job absent from a sample keeps its last known usage (L6).
+- `Config.missing_samples_warn` (default 5) and `Warn(JobNotObserved(job_id, attempt, device_id))`, edge-triggered, after that many consecutive device samples without the job (L6).
+- Rule S usage floor: `Device.stable_min_usage` (default off). A job that never reported steps is not marked STABLE on a device before its usage there exceeded the floor; `max_warmup_s` does not override it, and `Warn(NoUsageObserved(job_id, attempt, device_id))` is raised at `max_warmup_s` instead (L6).
+- Simulator workloads take `reports_steps=False` (a process without a step counter).
+- State schema v5: `Device.stable_min_usage`, `DeviceState.samples`, `JobRuntime.obs_sample` (migration from v4: floor off, no samples counted).
 - Rule A: `Config.min_trusted_observations` (default 3). `trusted_margin` applies only when the level-0 key holds that many complete observations (`HistoryEntry.observation_count`, `EstimateResult.observations`, `Snapshot.observations`, `Start.observations`); with fewer, a trusted job counts with `safety_margin`. State schema v3 (migration from v2: no observations, i.e. `safety_margin`) (SPEC §5).
 - `Config.trusted_margin` (default 1.05): a trusted STARTING/WARMING job counts as `max(E × trusted_margin, usage)`; `safety_margin` (1.15) stays for reservations from one observation (SPEC §5; changed after the first benchmark results).
 - `Report.ooms_per_job`, `max_job_ooms`, `repeat_device_ooms`; `TimelineEntry.device` names the device of an OOM kill.

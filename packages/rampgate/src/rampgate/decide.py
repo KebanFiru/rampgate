@@ -31,7 +31,9 @@ from rampgate.actions import (
     ForeignUsageHigh,
     GroupCompleted,
     HintExceeded,
+    JobNotObserved,
     MarkStable,
+    NoUsageObserved,
     Overcommitted,
     QueueStopped,
     Requeue,
@@ -73,7 +75,7 @@ from rampgate.model import (
 from rampgate.policies.base import OrderingPolicy
 from rampgate.reducer import IgnoredEvent, reduce
 from rampgate.resources import Resources
-from rampgate.stability import is_stable
+from rampgate.stability import below_usage_floor, is_stable
 
 __all__ = [
     "PROBATION",
@@ -338,10 +340,15 @@ def _stops(tick: _Tick) -> None:
             tick.emit(Stop(rt.id, rt.attempt, rt.stop_intent, tick.config.preempt_grace_s))
 
 
+def _usage_floors(state: State) -> dict[DeviceId, Resources]:
+    return {d: ds.device.stable_min_usage for d, ds in state.devices.items()}
+
+
 def _mark_stable(tick: _Tick) -> None:
     margin = tick.config.safety_margin
+    floors = _usage_floors(tick.state)
     for rt in tick.jobs(JobState.WARMING):
-        if not is_stable(rt, tick.now, tick.config):
+        if not is_stable(rt, tick.now, tick.config, floors):
             continue
         reservation = {}
         for d in rt.job.devices:
@@ -598,8 +605,29 @@ def _edge_warnings(tick: _Tick) -> None:
             peak = rt.peak.get(d)
             if hint is not None and peak is not None and peak.exceeds(hint):
                 add(HintExceeded(rt.id, rt.attempt, d, hint, peak))
+    floors = _usage_floors(tick.state)
+    for rt in tick.jobs(JobState.WARMING):
+        warm_start = rt.warm_start
+        if warm_start is not None and tick.now - warm_start >= tick.config.max_warmup_s:
+            for d in below_usage_floor(rt, floors):
+                add(NoUsageObserved(rt.id, rt.attempt, d))
+    missing = tick.config.missing_samples_warn
+    if missing > 0:
+        for rt in tick.jobs(JobState.WARMING, JobState.STABLE):
+            for d in rt.job.devices:
+                ds = tick.state.devices.get(d)
+                seen = rt.obs_sample.get(d)
+                if ds is not None and seen is not None and ds.samples - seen >= missing:
+                    add(JobNotObserved(rt.id, rt.attempt, d))
 
-    owned = (CapacityExceeded, Overcommitted, ForeignUsageHigh, HintExceeded)
+    owned = (
+        CapacityExceeded,
+        Overcommitted,
+        ForeignUsageHigh,
+        HintExceeded,
+        NoUsageObserved,
+        JobNotObserved,
+    )
     active = {k: w for k, w in tick.state.active_warnings.items() if isinstance(w, owned)}
     if not tick.admission_evaluated:
         # Paused: the foreign-usage condition was not evaluated, so it keeps its state.

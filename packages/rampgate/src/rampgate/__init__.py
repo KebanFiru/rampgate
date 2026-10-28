@@ -9,7 +9,9 @@ from rampgate.actions import (
     GroupCompleted,
     GroupOutcome,
     HintExceeded,
+    JobNotObserved,
     MarkStable,
+    NoUsageObserved,
     Overcommitted,
     QueueStopped,
     Requeue,
@@ -37,7 +39,7 @@ from rampgate.decide import (
     device_loads,
     measured_free,
 )
-from rampgate.engine import Engine
+from rampgate.engine import Engine, JobSample
 from rampgate.estimators import (
     EstimateResult,
     Estimator,
@@ -167,8 +169,10 @@ __all__ = [
     "Job",
     "JobExited",
     "JobId",
+    "JobNotObserved",
     "JobObserved",
     "JobRuntime",
+    "JobSample",
     "JobStarted",
     "JobState",
     "JobSubmitted",
@@ -177,6 +181,7 @@ __all__ = [
     "MarkStable",
     "Message",
     "MiB",
+    "NoUsageObserved",
     "NullEstimator",
     "Number",
     "OrderingPolicy",

@@ -4,7 +4,7 @@ from __future__ import annotations
 
 from collections.abc import Iterable, Mapping
 from dataclasses import replace
-from typing import Any
+from typing import Any, NamedTuple
 
 from rampgate.actions import Action, Unreconciled, Warn, WarnCleared, key_id, warning_key
 from rampgate.config import Config
@@ -40,12 +40,22 @@ from rampgate.model import (
 )
 from rampgate.policies.base import OrderingPolicy
 from rampgate.reducer import InvalidTransition, drain, reduce
+from rampgate.resources import Resources
 from rampgate.serialization import UnsupportedSchema, dump_state, load_state
 
-__all__ = ["ENGINE_FORMAT", "Engine"]
+__all__ = ["ENGINE_FORMAT", "Engine", "JobSample"]
 
 ENGINE_FORMAT = "rampgate.engine"
 _ENGINE_SCHEMA = 1
+
+
+class JobSample(NamedTuple):
+    """One job's part of a device sample (`Engine.observe_sample`)."""
+
+    attempt: int | None
+    usage: Resources
+    steps: int | None = None
+    epoch: int | None = None
 
 
 class Engine:
@@ -152,10 +162,41 @@ class Engine:
         self._apply(JobUpdated(job_id, **fields))
 
     def observe(self, event: JobObserved | DeviceObserved) -> None:
+        """Apply one observation.
+
+        **Order matters** within one sample: rampgate infers foreign usage at a
+        `DeviceObserved` from the jobs' *latest* usage, so apply a sample's
+        `JobObserved` events before its `DeviceObserved`. Otherwise a growing job's
+        growth since its previous observation counts as foreign. `observe_sample`
+        does this for you.
+        """
         if isinstance(event, JobObserved):
             self._fact(event)
         else:
             self._apply(event)
+
+    def observe_sample(
+        self,
+        device_id: DeviceId,
+        t: float,
+        used_total: Resources,
+        per_job: Mapping[JobId, JobSample | tuple[int | None, Resources, int | None, int | None]],
+    ) -> None:
+        """Apply one sample of one device atomically: every job's usage, then the total.
+
+        ``per_job`` maps a job to ``(attempt, usage, steps, epoch)`` as measured in
+        this sample (``attempt`` None = the current attempt). A running job that is
+        absent was **not observed** in this sample: its last known usage still counts
+        as managed (``used_total`` contains it), nothing about it is confirmed, its
+        stability and peak do not move, and after ``Config.missing_samples_warn``
+        such samples in a row it raises ``Warn(JobNotObserved)``.
+        """
+        for job_id in sorted(per_job):
+            attempt, usage, steps, epoch = per_job[job_id]
+            self.observe(
+                JobObserved(job_id, device_id, t, usage, steps=steps, epoch=epoch, attempt=attempt)
+            )
+        self.observe(DeviceObserved(device_id, t, used_total))
 
     def on_started(self, job_id: JobId, attempt: int, t: float) -> None:
         self._fact(JobStarted(job_id, attempt, t))

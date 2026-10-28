@@ -41,6 +41,9 @@ class Config:
     # Rule V: vacate when managed load exceeds C * (1 - headroom). From the simulator's
     # noise bound (2 %); calibrate on real hardware.
     vacate_headroom: float = 0.02
+    # Warn(JobNotObserved) after this many consecutive device samples without an
+    # observation of a running job there (0: never).
+    missing_samples_warn: int = 5
 
     def __post_init__(self) -> None:
         for f in fields(self):
@@ -65,6 +68,7 @@ class Config:
             "max_oom_retries",
             "max_lost_retries",
             "min_trusted_observations",
+            "missing_samples_warn",
         ):
             if not isinstance(getattr(self, name), int):
                 raise TypeError(f"{name} must be an int")

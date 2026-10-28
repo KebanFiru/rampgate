@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import math
+from typing import Any
 
 import pytest
 from hypothesis import given, settings
@@ -44,7 +45,7 @@ GPU = Device("gpu:0", Resources(vram=100))
 FAST = Config(min_warmup_s=5, stable_window_s=10, stable_min_steps=5, stable_requires_epoch=False)
 
 
-def flat(vram: float, duration: float = 100.0, **kw: float) -> StepProfile:
+def flat(vram: float, duration: float = 100.0, **kw: Any) -> StepProfile:
     return StepProfile(steps=((0, Resources(vram=vram)),), duration_s=duration, **kw)
 
 

@@ -28,7 +28,7 @@ __all__ = [
 ]
 
 STATE_FORMAT = "rampgate.state"
-SCHEMA_VERSION = 4
+SCHEMA_VERSION = 5
 
 
 def _v1_to_v2(payload: Any) -> Any:
@@ -77,8 +77,31 @@ def _v3_to_v4(payload: Any) -> Any:
     return payload
 
 
+def _v4_to_v5(payload: Any) -> Any:
+    """v5 adds the Rule S usage floor ``Device.stable_min_usage`` (off), the sample
+    counters ``DeviceState.samples`` and ``JobRuntime.obs_sample``; v4 dumps start
+    with the floor off and no samples counted."""
+    if isinstance(payload, dict):
+        out = {k: _v4_to_v5(v) for k, v in payload.items()}
+        if out.get("$t") == "Device":
+            out["f"].setdefault("stable_min_usage", {"$r": {}})
+        if out.get("$t") == "DeviceState":
+            out["f"].setdefault("samples", 0)
+        if out.get("$t") == "JobRuntime":
+            out["f"].setdefault("obs_sample", {"$m": []})
+        return out
+    if isinstance(payload, list):
+        return [_v4_to_v5(v) for v in payload]
+    return payload
+
+
 # MIGRATIONS[v] upgrades a version-v ``state`` payload to version v + 1.
-MIGRATIONS: dict[int, Callable[[Any], Any]] = {1: _v1_to_v2, 2: _v2_to_v3, 3: _v3_to_v4}
+MIGRATIONS: dict[int, Callable[[Any], Any]] = {
+    1: _v1_to_v2,
+    2: _v2_to_v3,
+    3: _v3_to_v4,
+    4: _v4_to_v5,
+}
 
 
 class UnsupportedSchema(ValueError):

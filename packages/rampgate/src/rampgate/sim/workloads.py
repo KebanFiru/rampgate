@@ -39,6 +39,8 @@ class _Common:
     steps_per_s: float = 1.0
     checkpoint_every_s: float = 60.0
     noise: float = 0.0
+    # False: the process reports no step counter (Rule S judges it on time alone).
+    reports_steps: bool = True
 
     def epoch(self, t: float) -> int | None:
         return None

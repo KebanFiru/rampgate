@@ -253,7 +253,10 @@ class SimExecutor:
             proc = self.procs[job_id]
             if proc.began is None:
                 continue
+            steps: int | None
             steps, epoch = self._counters(job_id, now - proc.began)
+            if not getattr(self.workloads[job_id], "reports_steps", True):
+                steps = None
             for d in proc.job.devices:
                 totals[d] = totals[d] + proc.usage
                 self.usage_s[d] = self.usage_s[d] + proc.usage.scale(dt)

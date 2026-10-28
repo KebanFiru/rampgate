@@ -22,7 +22,9 @@ __all__ = [
     "GroupCompleted",
     "GroupOutcome",
     "HintExceeded",
+    "JobNotObserved",
     "MarkStable",
+    "NoUsageObserved",
     "Overcommitted",
     "QueueStopped",
     "Requeue",
@@ -176,6 +178,26 @@ class HintExceeded:
 
 
 @dataclass(frozen=True, slots=True)
+class NoUsageObserved:
+    """A WARMING job that reports no steps reached ``max_warmup_s`` without its usage on
+    the device ever exceeding the device's ``stable_min_usage``: Rule S keeps it WARMING."""
+
+    job_id: JobId
+    attempt: int
+    device_id: DeviceId
+
+
+@dataclass(frozen=True, slots=True)
+class JobNotObserved:
+    """A running job has not been observed on a device for ``missing_samples_warn``
+    consecutive device samples (its last known usage is still used)."""
+
+    job_id: JobId
+    attempt: int
+    device_id: DeviceId
+
+
+@dataclass(frozen=True, slots=True)
 class Overcommitted:
     """``sum(R) > C - F`` on a device; ``capacity`` is ``C - F``."""
 
@@ -225,6 +247,8 @@ WarningKind: TypeAlias = (
     | QueueStopped
     | Unreconciled
     | HintExceeded
+    | NoUsageObserved
+    | JobNotObserved
 )
 
 
@@ -234,6 +258,8 @@ EDGE_TRIGGERED: tuple[type, ...] = (
     ForeignUsageHigh,
     Unreconciled,
     HintExceeded,
+    NoUsageObserved,
+    JobNotObserved,
 )
 
 
@@ -249,7 +275,7 @@ def warning_key(w: WarningKind) -> tuple[str, tuple[str, ...]]:
             return kind, (w.job_id,)
         case UncleanStop():
             return kind, (w.job_id, str(w.attempt))
-        case HintExceeded():
+        case HintExceeded() | NoUsageObserved() | JobNotObserved():
             return kind, (w.job_id, str(w.attempt), w.device_id)
         case QueueStopped():
             return kind, (w.group, w.job_id)

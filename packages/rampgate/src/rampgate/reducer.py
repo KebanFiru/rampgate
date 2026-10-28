@@ -192,6 +192,11 @@ def _bad(rt: JobRuntime, what: str) -> InvalidTransition:
     return InvalidTransition(f"job {rt.id!r} (attempt {rt.attempt}, {rt.state}): {what}")
 
 
+def _samples(state: State, device_id: DeviceId) -> int:
+    ds = state.devices.get(device_id)
+    return 0 if ds is None else ds.samples
+
+
 def _fresh_attempt() -> dict[str, Any]:
     """Field values that ``Start`` resets for a new attempt."""
     return {
@@ -212,6 +217,7 @@ def _fresh_attempt() -> dict[str, Any]:
         "epoch_baseline": None,
         "epoch_latest": None,
         "reservation": frozen_map(),
+        "obs_sample": frozen_map(),
     }
 
 
@@ -314,6 +320,8 @@ def _job_started(state: State, ev: JobStarted) -> State:
         warm_start=ev.t,
         has_run=True,
         applied=rt.applied | {(ev.attempt, _STARTED)},
+        # JobNotObserved counts device samples from here until the first observation.
+        obs_sample=frozen_map({d: _samples(state, d) for d in rt.job.placement}),
     )
     return _put(state, rt)
 
@@ -357,6 +365,7 @@ def _job_observed(state: State, ev: JobObserved, config: Config) -> State:
         usage_samples=frozen_map({**rt.usage_samples, dev: (*kept, (ev.t, ev.usage))}),
         peak=frozen_map({**rt.peak, dev: new_peak}),
         last_obs_t=frozen_map({**rt.last_obs_t, dev: ev.t}),
+        obs_sample=frozen_map({**rt.obs_sample, dev: _samples(state, dev)}),
         last_peak_growth_t=growth_t,
         steps_baseline=baseline,
         steps_latest=latest,
@@ -679,7 +688,13 @@ def _device_observed(state: State, ev: DeviceObserved, config: Config) -> State:
     window_start = ev.t - config.foreign_window_s
     kept = tuple(s for s in ds.foreign_samples if s[0] >= window_start)
     samples = (*kept, (ev.t, foreign))
-    ds = replace(ds, used_total=ev.used_total, last_obs_t=ev.t, foreign_samples=samples)
+    ds = replace(
+        ds,
+        used_total=ev.used_total,
+        last_obs_t=ev.t,
+        foreign_samples=samples,
+        samples=ds.samples + 1,
+    )
     return replace(state, devices=frozen_map({**state.devices, ev.device_id: ds}))
 
 
