@@ -11,7 +11,7 @@ from collections.abc import Callable
 from dataclasses import replace
 from typing import Any
 
-from hypothesis import given, settings
+from hypothesis import example, given, settings
 from hypothesis import strategies as st
 
 from rampgate import (
@@ -59,6 +59,7 @@ from rampgate import (
 )
 from rampgate import DeviceObserved as DeviceObs
 from rampgate.decide import managed_changes, managed_load
+from rampgate.explain import DeviceHeldFor, WaitingForIsolation, WaitingForWarmup
 from rampgate.model import ACTIVE_STATES as ACTIVE
 from rampgate.reducer import _room_at_oom
 from rampgate.sim import (
@@ -258,9 +259,22 @@ def check_starts(
                 for g in groups[: groups.index(rt.job.group)]:
                     members = [o for o in work.jobs.values() if o.job.group == g]
                     assert all(o.state in TERMINAL_STATES for o in members), (g, rt.id)
-            if policy.head_of_line_blocking:  # I15
+            if policy.head_of_line_blocking:  # I15, except where rt is d's isolation holder
+                holds_isolation = {
+                    d
+                    for d in rt.job.placement
+                    if (
+                        waiting := [
+                            o
+                            for o in work.jobs_on(d)
+                            if o.state is JobState.PENDING and o.isolate_seq is not None
+                        ]
+                    )
+                    and min(waiting, key=lambda o: o.isolate_seq or 0).id == rt.id
+                }
                 for earlier in order[: order.index(rt.id)]:
                     shared = set(work.jobs[earlier].job.placement) & set(rt.job.placement)
+                    shared -= holds_isolation
                     assert not shared or earlier in started, (earlier, rt.id, shared)
             started.append(rt.id)
         work = reduce(work, action, cfg)
@@ -357,6 +371,48 @@ def check_explained(tick: Tick) -> None:
             assert rt.id in tick.decision.explanations, rt.id
 
 
+def check_i20(tick: Tick) -> None:
+    """I20 (liveness): on a device with no active managed job, a PENDING job that needs it
+    is started this tick, or waits for a reason that is not a scheduler hold. A hold
+    (``DeviceHeldFor``) is fine when its chain ends in such a reason; a cycle is a
+    mutual hold. ``WaitingForWarmup`` / ``WaitingForIsolation`` count only on a device
+    that has an active job."""
+    state = tick.snapshot.state
+    if state.paused:
+        return
+    expl = tick.decision.explanations
+    busy = {d for d in state.devices if any(rt.state in ACTIVE for rt in state.jobs_on(d))}
+    started = {d for a in tick.decision.actions if isinstance(a, Start) for d in a.placement}
+
+    def waits_legitimately(job_id: str, chain: tuple[str, ...]) -> bool:
+        rt = state.jobs[job_id]
+        if rt.state is not JobState.PENDING or (
+            job_id in tick.after.jobs and (tick.after.jobs[job_id].state is not JobState.PENDING)
+        ):
+            return True  # started (or left PENDING) this tick
+        e = expl.get(job_id)
+        assert e is not None, ("I20: unexplained", job_id)
+        if isinstance(e, DeviceHeldFor):
+            if e.job_id in chain or e.job_id == job_id:
+                return False
+            return waits_legitimately(e.job_id, (*chain, job_id))
+        if isinstance(e, WaitingForWarmup | WaitingForIsolation):
+            return e.device_id in busy or e.device_id in started
+        return True
+
+    for d in state.devices:
+        if d in busy or d in started:
+            continue
+        for rt in state.jobs.values():
+            if rt.state is JobState.PENDING and d in rt.job.devices:
+                assert waits_legitimately(rt.id, ()), (
+                    "I20: mutual hold",
+                    tick.now,
+                    d,
+                    {j: expl.get(j) for j in state.jobs if state.jobs[j].state is JobState.PENDING},
+                )
+
+
 def check_i16(tick: Tick, raised: dict[str, bool]) -> None:
     """I16: per key, Warn and WarnCleared strictly alternate, starting with Warn."""
     for action in tick.decision.actions:
@@ -377,8 +433,59 @@ def check_groups(state: State) -> None:
             assert rt.job.group not in state.completed_groups
 
 
+def _deadlock_case() -> tuple[Scenario, OrderingPolicy]:
+    """Found by hypothesis in CI after held-out evaluation 2 (not by results): under a
+    head-of-line-blocking policy, a Rule V vacate (j4) queued ahead of an isolation retry
+    (j5) closed gpu:0 for j5 while j5's isolation hold kept j4 out: a mutual hold."""
+
+    def job(i: int, workload: Spiky | RampPlateau) -> SimJob:
+        return SimJob(Job(f"j{i}", {"gpu:0": None}), workload, 0.0)
+
+    def spiky(base: int, spike: int, every: float, duration: float) -> Spiky:
+        return Spiky(
+            base=Resources(vram=base),
+            spike=Resources(vram=spike),
+            every_s=every,
+            duration_s=duration,
+            checkpoint_every_s=5.0,
+        )
+
+    ramp = RampPlateau(
+        duration_s=10.0,
+        steps_per_s=1.0,
+        checkpoint_every_s=5.0,
+        load_s=1.0,
+        ramp_s=1.0,
+        plateau=Resources(vram=1),
+    )
+    jobs = (
+        job(0, spiky(1, 1, 10, 10)),
+        job(1, spiky(1, 1, 10, 10)),
+        job(2, spiky(1, 1, 10, 10)),
+        job(3, spiky(12, 1, 10, 36)),
+        job(4, spiky(1, 87, 13, 18)),
+        job(5, ramp),
+    )
+    devices = (Device("gpu:0", Resources(vram=100)), Device("gpu:1", Resources(vram=100)))
+    return Scenario(devices, jobs, commands=(), foreign={}, seed=0), FifoPolicy(strict=True)
+
+
+DEADLOCK_CASE = _deadlock_case()
+
+
+def test_isolation_hold_takes_precedence_over_head_of_line_hold() -> None:
+    """Regression (after held-out evaluation 2): the mutual hold of DEADLOCK_CASE."""
+    scenario, policy = DEADLOCK_CASE
+    for downtime in ((), ((1.0, 2.0),)):
+        trace = simulate(scenario, policy, config=CFG, max_time=4000.0, downtime=list(downtime))
+        for tick in trace.ticks:
+            check_i20(tick)
+        assert all(rt.state in TERMINAL_STATES for rt in trace.final.jobs.values())
+
+
 @SETTINGS
 @given(scenarios())
+@example(DEADLOCK_CASE)
 def test_invariants_hold_in_simulation(case: tuple[Scenario, OrderingPolicy]) -> None:
     scenario, policy = case
     cfg = config_for(scenario)
@@ -393,6 +500,7 @@ def test_invariants_hold_in_simulation(case: tuple[Scenario, OrderingPolicy]) ->
         check_i18(tick, cfg)
         check_explained(tick)
         check_i16(tick, raised)
+        check_i20(tick)
         for state in (tick.snapshot.state, tick.after):
             check_i1(state, cfg)
             check_groups(state)

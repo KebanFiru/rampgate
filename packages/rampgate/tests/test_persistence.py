@@ -57,6 +57,7 @@ from test_invariants import (
     check_explained,
     check_i1,
     check_i16,
+    check_i20,
     check_starts,
     scenarios,
 )
@@ -504,6 +505,7 @@ def test_restart_with_downtime_reconciles_and_finishes(
         check_starts(tick, policy)
         check_explained(tick)
         check_i16(tick, raised)
+        check_i20(tick)
     final = trace.final
     stuck = {
         j: (rt.state, rt.attempt, trace.ticks[-1].decision.explanations.get(j))

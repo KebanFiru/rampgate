@@ -457,7 +457,9 @@ def _admit(tick: _Tick, policy: OrderingPolicy, admission: Admission) -> None:  
         if rt is None or rt.state is not JobState.PENDING:
             continue
         devices = rt.job.devices
-        held_devices = [d for d in devices if d in held]
+        # An isolation hold on d takes precedence over head-of-line holds on d: a
+        # candidate waiting for d's isolation holder never closes d for that holder.
+        held_devices = [d for d in devices if d in held and isolating.get(d) != rt.id]
         if held_devices:
             d = held_devices[0]
             tick.explanations[job_id] = DeviceHeldFor(d, held[d])

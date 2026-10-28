@@ -47,7 +47,7 @@ from rampgate.sim import (
     simulate,
 )
 from rampgate_testkit import GPU, Driver, examples
-from test_invariants import check_groups, check_i1, check_i16, scenarios
+from test_invariants import check_groups, check_i1, check_i16, check_i20, scenarios
 
 DEV = Device(GPU, Resources(vram=100))
 _ACTIVE = (JobState.STARTING, JobState.WARMING, JobState.STABLE, JobState.STOPPING)
@@ -200,6 +200,7 @@ def test_reducer_invariants_hold_for_every_strategy(
     raised: dict[str, bool] = {}
     for tick in trace.ticks:
         check_i16(tick, raised)
+        check_i20(tick)
         for state in (tick.snapshot.state, tick.after):
             check_groups(state)
             if strategy.admission.probation:

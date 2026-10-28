@@ -2,6 +2,9 @@
 
 ## Unreleased
 
+### Fixed
+- An isolation hold on a device takes precedence over head-of-line holds there: under `FifoPolicy(strict=True)` or `PriorityPolicy`, a job queued ahead of an isolation retry and kept out by its hold no longer closes the device for the holder (a mutual hold that left both PENDING forever). Found by hypothesis in CI after held-out evaluation 2; the benchmark's policies were not affected. New liveness invariant I20.
+
 ### Added
 - Rule A: `Config.min_trusted_observations` (default 3). `trusted_margin` applies only when the level-0 key holds that many complete observations (`HistoryEntry.observation_count`, `EstimateResult.observations`, `Snapshot.observations`, `Start.observations`); with fewer, a trusted job counts with `safety_margin`. State schema v3 (migration from v2: no observations, i.e. `safety_margin`) (SPEC §5).
 - `Config.trusted_margin` (default 1.05): a trusted STARTING/WARMING job counts as `max(E × trusted_margin, usage)`; `safety_margin` (1.15) stays for reservations from one observation (SPEC §5; changed after the first benchmark results).
