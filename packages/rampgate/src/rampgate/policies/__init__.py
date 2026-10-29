@@ -1,4 +1,4 @@
-"""Ordering policies (SPEC §6)."""
+"""Ordering policies (docs/policies.md)."""
 
 from rampgate.policies.base import BasePolicy, OrderingPolicy, StateView
 from rampgate.policies.fifo import FifoPolicy

@@ -1,4 +1,4 @@
-"""Stale, duplicate and out-of-order events (SPEC §4)."""
+"""Stale, duplicate and out-of-order events (docs/concepts.md)."""
 
 from dataclasses import replace
 

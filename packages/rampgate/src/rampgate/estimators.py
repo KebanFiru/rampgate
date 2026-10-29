@@ -1,4 +1,4 @@
-"""Estimators and history stores (SPEC §7)."""
+"""Estimators and history stores (docs/estimators.md)."""
 
 from __future__ import annotations
 
@@ -42,16 +42,16 @@ class EstimateResult:
     ``level == 0`` is the most specific key (the exact template and config).
     ``complete``: the value includes a full observation of a ramp (a ``peak`` or
     ``running`` record), not only lower bounds from OOMs or stops. Only a complete
-    level-0 estimate is *trusted* and lets a job skip probation (SPEC §5).
+    level-0 estimate is *trusted* and lets a job skip probation (docs/algorithm.md).
     ``lower_bound_dims``: the dimensions whose value is a lower bound (no complete record,
     or a newer lower bound above it), where the job needs *more* than ``value``;
-    `resolve_estimates` grows them like Rule O (SPEC §5).
+    `resolve_estimates` grows them like Rule O (docs/algorithm.md).
     """
 
     value: Resources
     level: int = 0
     complete: bool = True
-    # Complete observations behind the value (rule A, SPEC §5); 0 = unknown, the safe side.
+    # Complete observations behind the value (rule A); 0 = unknown, the safe side.
     observations: int = 0
     lower_bound_dims: frozenset[str] = frozenset()
 
@@ -119,7 +119,7 @@ class HistoryStore(Protocol):
     stored value (a new record, or a larger value for its id) gives it the next
     sequence number; a put that changes nothing leaves it as it was, so replaying
     a record never makes it newer. ``get`` uses that order to drop lower bounds
-    older than the newest complete record (SPEC §5, §7).
+    older than the newest complete record (docs/algorithm.md, docs/estimators.md).
     """
 
     def get(self, key: str, device_kind: str) -> HistoryEntry | None: ...
@@ -250,7 +250,7 @@ class HistoryEstimator:
     for the most specific key that has data, ``max(complete, newer lower bound)``.
     The result is complete only if a complete record gives the value: a lower
     bound alone, or a newer lower bound above the complete value, says the job
-    needs *more than* that, so the estimate is untrusted (SPEC §5).
+    needs *more than* that, so the estimate is untrusted (docs/algorithm.md).
     """
 
     def __init__(
@@ -356,7 +356,7 @@ def resolve_estimates(state: State, estimator: Estimator, config: Config | None 
 
     In the dimensions where the answer is a lower bound, it becomes
     ``min(value * oom_growth, capacity)`` (never below the value), the step Rule O gives
-    the OOM'd job itself (SPEC §5).
+    the OOM'd job itself (docs/algorithm.md).
     """
     growth = (config or Config()).oom_growth
     estimates: dict[JobId, Mapping[DeviceId, Resources | None]] = {}

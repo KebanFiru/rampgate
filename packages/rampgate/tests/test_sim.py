@@ -1,4 +1,4 @@
-"""The minimal simulator and the epoch gate (SPEC §5, §8)."""
+"""The minimal simulator and the epoch gate (docs/algorithm.md, docs/simulator.md)."""
 
 import pytest
 

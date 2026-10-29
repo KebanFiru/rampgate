@@ -1,4 +1,4 @@
-"""Explanations: why a job is waiting (SPEC §3.7)."""
+"""Explanations: why a job is waiting (docs/concepts.md)."""
 
 from __future__ import annotations
 
@@ -101,7 +101,7 @@ class RejectedByAdmission:
 @dataclass(frozen=True, slots=True)
 class WaitingForIsolation:
     """An isolation retry (it OOMed before it was stable) waits for ``device_id`` to be empty
-    of other managed jobs (SPEC §5)."""
+    of other managed jobs (docs/algorithm.md)."""
 
     device_id: DeviceId
 

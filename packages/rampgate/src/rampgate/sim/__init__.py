@@ -1,4 +1,4 @@
-"""Deterministic discrete-event simulator (SPEC §8). Standard library only."""
+"""Deterministic discrete-event simulator (docs/simulator.md). Standard library only."""
 
 from rampgate.sim.baselines import (
     ABLATIONS,

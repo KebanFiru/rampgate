@@ -1,4 +1,4 @@
-"""Every lifecycle transition of SPEC §3.4, valid and invalid."""
+"""Every lifecycle transition of docs/concepts.md, valid and invalid."""
 
 from dataclasses import replace
 

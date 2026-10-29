@@ -1,4 +1,4 @@
-"""Reservation updates after stabilizing (SPEC §5, I6)."""
+"""Reservation updates after stabilizing (docs/algorithm.md, I6)."""
 
 import pytest
 

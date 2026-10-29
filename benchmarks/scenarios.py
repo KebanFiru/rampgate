@@ -1,4 +1,4 @@
-"""Benchmark scenarios (SPEC §8): ``make(name, seed) -> Case``.
+"""Benchmark scenarios (docs/simulator.md): ``make(name, seed) -> Case``.
 
 A seed changes the scenario itself (which templates the jobs use, per-job size
 jitter, durations, submit times, noise and hint errors), not only the

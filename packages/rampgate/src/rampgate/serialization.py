@@ -1,4 +1,4 @@
-"""Lossless, versioned JSON for the reducer state (SPEC §4, I8).
+"""Lossless, versioned JSON for the reducer state (docs/concepts.md, I8).
 
 Only classes from rampgate's own model modules can be decoded (an explicit
 allowlist built at import time); nothing is imported dynamically from a dump.

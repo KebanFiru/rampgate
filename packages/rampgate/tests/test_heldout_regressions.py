@@ -1,4 +1,4 @@
-"""The bench-freeze-1 held-out failures as regression tests (SPEC §12 L4).
+"""The bench-freeze-1 held-out failures as regression tests (the L4 gates).
 
 Each (scenario, seed) had cold `Probation` OOM outside first contact on tag
 ``bench-freeze-1``; the traces are in ``docs/benchmark/freeze-1/heldout-failures.md``.

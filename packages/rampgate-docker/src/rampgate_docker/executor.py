@@ -1,4 +1,4 @@
-"""`DockerExecutor`: rampgate's `Start`/`Stop` actions as Docker containers (SPEC §9)."""
+"""`DockerExecutor`: rampgate's `Start`/`Stop` actions as Docker containers (docs/adapters.md)."""
 
 from __future__ import annotations
 

@@ -1,4 +1,5 @@
-"""`SimExecutor`: applies actions to simulated processes and reports what happens (SPEC §8)."""
+"""`SimExecutor`: applies actions to simulated processes and reports what happens
+(docs/simulator.md)."""
 
 from __future__ import annotations
 

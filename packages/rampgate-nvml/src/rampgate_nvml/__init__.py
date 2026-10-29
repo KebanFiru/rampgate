@@ -1,4 +1,4 @@
-"""NVIDIA GPU probe for rampgate (NVML), with process-to-container mapping (SPEC §9).
+"""NVIDIA GPU probe for rampgate (NVML), with process-to-container mapping (docs/adapters.md).
 
 - `NvmlProbe` reports each GPU as a rampgate device (`device`) and samples
   its total usage and the usage of every process on it (`sample`).

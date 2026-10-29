@@ -1,4 +1,4 @@
-"""Rule S (stability) and steps semantics, SPEC §3.5 and §5."""
+"""Rule S (stability) and steps semantics, docs/concepts.md and §5."""
 
 import pytest
 

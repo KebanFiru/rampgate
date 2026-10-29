@@ -1,4 +1,4 @@
-"""Scenarios and the minimal run loop of the simulator (SPEC §8)."""
+"""Scenarios and the minimal run loop of the simulator (docs/simulator.md)."""
 
 from __future__ import annotations
 

@@ -1,4 +1,4 @@
-"""`Report`: what a simulated run achieved (SPEC §8), and `run` for one strategy."""
+"""`Report`: what a simulated run achieved (docs/simulator.md), and `run` for one strategy."""
 
 from __future__ import annotations
 
@@ -33,7 +33,7 @@ class Report:
     - ``first_contact_ooms``: OOMs reported to the engine while their device
       hosted a STARTING/WARMING first-attempt job that had no observation-based
       estimate there: the estimator had no record at any fingerprint level when
-      it was admitted (SPEC §12 L4 and its clarification). Split into
+      it was admitted (the L4 gates and their clarification). Split into
       ``first_contact_unknown`` (admitted with no estimate at all) and
       ``first_contact_hint`` (admitted on its declared hint alone); when both
       kinds ramp on the device, the OOM counts as ``unknown``.
@@ -49,7 +49,7 @@ class Report:
     - ``vacated``: Rule V vacates (``Requeue(VACATED)`` actions).
     - ``isolation_wait_s``: summed over isolation retries, the time from the OOM requeue to
       the next ``Start`` (to the end of the run if it never started).
-    - ``overcommitted_warnings``: ``Warn(Overcommitted)`` actions (SPEC §13, v0.2 note).
+    - ``overcommitted_warnings``: ``Warn(Overcommitted)`` actions (a v0.2 roadmap note).
     """
 
     makespan: float | None
@@ -141,7 +141,7 @@ def _first_contact(
     oom: JobExited,
     answered: Mapping[tuple[JobId, int], frozenset[DeviceId]],
 ) -> FirstContact | None:
-    """SPEC §12 L4 (clarified): a first-attempt job without an observation-based estimate
+    """the L4 gates (clarified): a first-attempt job without an observation-based estimate
     is ramping on one of the OOM'd devices. ``answered[(job, attempt)]``: devices where
     the estimator had a record (at any fingerprint level) when that attempt started."""
     victim = before.jobs.get(oom.job_id)

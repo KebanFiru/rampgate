@@ -35,6 +35,7 @@ nav:
   - Simulator: simulator.md
   - Integrating rampgate: integrating.md
   - Restarts and reconciliation: reconciliation.md
+  - Invariants: invariants.md
   - Benchmark: benchmark.md
   - Real hardware: real-run/assumptions.md
   - Prior art: prior-art.md

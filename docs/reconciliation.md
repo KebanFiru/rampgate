@@ -81,7 +81,7 @@ What the engine does with each answer:
 | You report | Result |
 |---|---|
 | `on_exited(..., LOST)` | re-queued with `resume=True` (no OOM accounting; bounded by `max_lost_retries`) |
-| `on_exited(..., SUCCESS / FAILURE / OOM)` | the normal lifecycle rules (SPEC §3.4, Rule O) |
+| `on_exited(..., SUCCESS / FAILURE / OOM)` | the normal lifecycle rules ([Lifecycle](concepts.md#lifecycle), Rule O) |
 | an observation of the current attempt | the job simply continues |
 | nothing, for a job that was STARTING | after `start_timeout_s` it gets `Requeue(START_TIMEOUT)` |
 

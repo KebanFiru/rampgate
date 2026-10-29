@@ -1,4 +1,4 @@
-"""The ordering policy protocol (SPEC §6)."""
+"""The ordering policy protocol (docs/policies.md)."""
 
 from __future__ import annotations
 

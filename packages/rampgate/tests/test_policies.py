@@ -1,4 +1,4 @@
-"""Ordering policies (SPEC §6)."""
+"""Ordering policies (docs/policies.md)."""
 
 import pytest
 

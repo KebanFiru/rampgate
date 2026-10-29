@@ -1,4 +1,4 @@
-"""Docker executor, exit classification and event watcher for rampgate (SPEC §9)."""
+"""Docker executor, exit classification and event watcher for rampgate (docs/adapters.md)."""
 
 from rampgate_docker.classify import DEFAULT_OOM_PATTERNS, classify_exit
 from rampgate_docker.executor import (

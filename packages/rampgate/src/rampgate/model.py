@@ -1,4 +1,4 @@
-"""Static model (`Device`, `Job`) and the reducer's immutable state (SPEC §3)."""
+"""Static model (`Device`, `Job`) and the reducer's immutable state (docs/concepts.md)."""
 
 from __future__ import annotations
 
@@ -80,7 +80,7 @@ class StopReason(StrEnum):
 class Device:
     """A device rampgate admits jobs onto.
 
-    ``stable_min_usage`` is the Rule S usage floor (SPEC §5): a job that reports no
+    ``stable_min_usage`` is the Rule S usage floor (docs/algorithm.md): a job that reports no
     steps becomes STABLE on this device only after its usage here exceeded the floor
     in some dimension, and its warm-up counts from that crossing. Off (``Resources()``)
     by default, because rampgate does not know the device's units;
@@ -170,7 +170,7 @@ class HistoryRecord:
 
     @property
     def record_id(self) -> str:
-        """``job:attempt:device:kind``; stores max-merge records with the same id (SPEC §7)."""
+        """``job:attempt:device:kind``; stores max-merge records with the same id."""
         return f"{self.job_id}:{self.attempt}:{self.device_id}:{self.kind}"
 
 
@@ -218,7 +218,7 @@ class JobRuntime:
     admit_seq: int | None = None
     # Stopped by Rule V: returns to PENDING after exit unless a user stop request wins.
     vacating: bool = False
-    # Isolation retry (SPEC §5): set when the job OOMed before it was stable, cleared at
+    # Isolation retry (docs/algorithm.md): set when the job OOMed before it was stable, cleared at
     # MarkStable; the order of that OOM, so the oldest one holds a device.
     isolate_seq: int | None = None
     # Per device, its sample counter (DeviceState.samples) when this attempt was last
@@ -340,11 +340,11 @@ class Snapshot:
         default_factory=frozen_map
     )
     trusted: frozenset[tuple[JobId, DeviceId]] = frozenset()
-    # Complete observations behind a trusted estimate (rule A, SPEC §5); missing = 0.
+    # Complete observations behind a trusted estimate (rule A, docs/algorithm.md); missing = 0.
     observations: Mapping[tuple[JobId, DeviceId], int] = field(default_factory=frozen_map)
 
     def is_trusted(self, rt: JobRuntime, device_id: DeviceId) -> bool:
-        """SPEC §5: the estimator answered from the most specific fingerprint level and the
+        """Rule A: the estimator answered from the most specific fingerprint level and the
         job has not OOMed. Hints, learned values and fallback levels are untrusted."""
         return (rt.id, device_id) in self.trusted and rt.oom_count == 0
 

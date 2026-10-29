@@ -1,4 +1,4 @@
-"""Pluggable admission, baselines and ablations (SPEC §8)."""
+"""Pluggable admission, baselines and ablations (docs/simulator.md)."""
 
 from __future__ import annotations
 

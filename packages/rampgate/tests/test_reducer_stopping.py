@@ -1,4 +1,4 @@
-"""The 'exits while STOPPING' table of SPEC §3.4. A stopped job is never re-queued nor FAILED."""
+"""The 'exits while STOPPING' table (docs/concepts.md): never re-queued nor FAILED."""
 
 import pytest
 

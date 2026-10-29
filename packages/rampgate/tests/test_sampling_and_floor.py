@@ -1,4 +1,5 @@
-"""L6 items from the real-hardware runs (SPEC §12 L6): atomic sampling, missing samples,
+"""L6 items from the real-hardware runs (docs/real-run/assumptions.md):
+atomic sampling, missing samples,
 and the Rule S usage floor."""
 
 from __future__ import annotations
@@ -208,7 +209,8 @@ def test_no_usage_warning_cleared_when_the_job_starts_using_the_device() -> None
 
 def test_simulated_data_loading_phase_before_any_gpu_allocation() -> None:
     """A job without a step counter loads data for 90 s with no GPU memory, then ramps
-    (SPEC §12 L6). Without a floor, Rule S marks it STABLE on its empty loading phase."""
+    (docs/real-run/assumptions.md).
+    Without a floor, Rule S marks it STABLE on its empty loading phase."""
     plateau = Resources(vram=40)
     workload = StepProfile(
         steps=((0.0, Resources()), (90.0, Resources(vram=12)), (93.0, plateau)),
@@ -235,7 +237,7 @@ def test_simulated_data_loading_phase_before_any_gpu_allocation() -> None:
 
 def test_slow_growth_after_data_loading_is_capped_at_crossing_plus_max_warmup() -> None:
     """90 s of data loading, then growth that never goes quiet: STABLE at the floor
-    crossing + max_warmup_s, so the probation slot is still bounded (SPEC §5 Rule S)."""
+    crossing + max_warmup_s, so the probation slot is still bounded (docs/algorithm.md Rule S)."""
     growth = tuple((90.0 + 10 * k, Resources(vram=10 * 1.05**k)) for k in range(90))
     workload = StepProfile(
         steps=((0.0, Resources()), *growth),

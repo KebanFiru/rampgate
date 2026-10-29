@@ -1,4 +1,4 @@
-"""`Config`: every tunable threshold of the algorithm (SPEC §5)."""
+"""`Config`: every tunable threshold of the algorithm (docs/algorithm.md)."""
 
 from __future__ import annotations
 

@@ -17,7 +17,7 @@ Everything runs in Docker; nothing is installed on the host.
 ## Rules
 
 - **The core stays pure:** no I/O, threads, wall clock, randomness or imports outside the standard library in `packages/rampgate`. Time and randomness are passed in. The zero-dependency check enforces the last part.
-- **Behaviour is specified first.** `SPEC.md` describes every rule and invariant; change it in the same pull request as the code, and say why.
+- **Behaviour is documented with the code.** The rules are in `docs/algorithm.md` and the invariants in `docs/invariants.md`; change them in the same pull request as the code, and say why.
 - **Invariants are tested with hypothesis** (`packages/rampgate/tests/test_invariants.py`). A bug found by hypothesis becomes an explicit `@example` and a regression test.
 - **Benchmark results are not tuned.** Criteria are fixed before measuring; a held-out seed set is run once per frozen configuration; changes after results were seen are listed in the README's Methodology. A change that should not affect the benchmark is proven with `benchmarks/trace_digest.py` (identical per-run action sequences).
 - **Conventional commits**, one logical change per commit. Update the package's `CHANGELOG.md`.

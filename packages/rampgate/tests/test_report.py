@@ -1,4 +1,4 @@
-"""Simulator ground truth, `Report` and `run` (SPEC §8)."""
+"""Simulator ground truth, `Report` and `run` (docs/simulator.md)."""
 
 from __future__ import annotations
 

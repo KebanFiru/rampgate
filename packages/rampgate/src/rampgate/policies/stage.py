@@ -1,4 +1,4 @@
-"""`StagePolicy`: groups run one after another (SPEC §6)."""
+"""`StagePolicy`: groups run one after another (docs/policies.md)."""
 
 from __future__ import annotations
 

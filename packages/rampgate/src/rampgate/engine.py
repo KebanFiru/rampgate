@@ -1,4 +1,5 @@
-"""`Engine`: the stateful, single-owner wrapper around ``reduce`` and ``decide`` (SPEC §4)."""
+"""`Engine`: the stateful, single-owner wrapper around ``reduce`` and ``decide``
+(docs/concepts.md)."""
 
 from __future__ import annotations
 

@@ -1,4 +1,4 @@
-"""SPEC §10 invariants under hypothesis-generated scenarios run through the simulator.
+"""docs/invariants.md under hypothesis-generated scenarios run through the simulator.
 
 Checked here: I1-I7, I9, I10, I13, I15, I17-I19 (per tick), I11 (fact-event replay) and
 I11b (command idempotence). I12 is checked by the reducer state machine
@@ -365,7 +365,7 @@ def check_exits(prev: State, tick: Tick) -> None:
 
 
 def check_explained(tick: Tick) -> None:
-    """SPEC §3.7: every waiting job gets an explanation (built-in policies)."""
+    """docs/concepts.md: every waiting job gets an explanation (built-in policies)."""
     for rt in tick.after.jobs.values():
         if rt.state in (JobState.PENDING, JobState.PREEMPTED):
             assert rt.id in tick.decision.explanations, rt.id

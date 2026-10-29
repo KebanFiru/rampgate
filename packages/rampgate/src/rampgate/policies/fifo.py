@@ -1,4 +1,4 @@
-"""`FifoPolicy`: submit order (SPEC §6)."""
+"""`FifoPolicy`: submit order (docs/policies.md)."""
 
 from __future__ import annotations
 

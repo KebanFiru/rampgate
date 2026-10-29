@@ -77,7 +77,7 @@ def test_check_gates_every_rampgate_row_but_not_ablations(bench: Any) -> None:
 def test_rule_a_regression_d_under_seed_5(bench: Any) -> None:
     """Development seeds, d-under seed 5: two tmpl:l1 jobs trusted on ONE running record
     (38.6 GiB) started side by side under trusted_margin 1.05; one peaked at 41.7 and an
-    OOM followed that was not first-contact. Rule A (SPEC §5) counts them with
+    OOM followed that was not first-contact. Rule A (docs/algorithm.md) counts them with
     safety_margin until 3 observations exist."""
     from rampgate.sim import STRATEGIES  # noqa: PLC0415
 

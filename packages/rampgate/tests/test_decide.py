@@ -1,4 +1,5 @@
-"""Example tests for ``decide``: Rules P and A, explanations, warnings (SPEC §3.7, §5)."""
+"""Example tests for ``decide``: Rules P and A, explanations, warnings
+(docs/concepts.md, docs/algorithm.md)."""
 
 import pytest
 
@@ -474,7 +475,7 @@ def test_decide_tolerates_odd_custom_policies() -> None:
 
 
 class _DuckPolicy:
-    """Implements only the three methods of the original SPEC protocol."""
+    """Implements only the three methods of the original protocol."""
 
     def candidates(self, view: object, now: float) -> list[str]:
         return ["b", "a"]
@@ -492,7 +493,7 @@ def test_duck_typed_policy_defaults_to_no_blocking_and_no_queue_stops() -> None:
     assert starts(dec) == ["a"]
 
 
-# -- trusted estimates and Rule P modes (SPEC §5) --------------------------------------------
+# -- trusted estimates and Rule P modes ------------------------------------------------------------
 
 
 def trusted_snapshot(d: Driver, job: str, vram: float, observations: int = 3) -> Snapshot:
@@ -518,7 +519,7 @@ def test_trusted_job_skips_probation_and_counts_estimate_times_trusted_margin() 
 
 
 def test_trusted_job_waits_while_an_untrusted_job_warms_on_its_device() -> None:
-    # SPEC §5 (after held-out evaluation 1), I17: a's peak is unknown, so it gets everything
+    # Rule P (after held-out evaluation 1), I17: a's peak is unknown, so it gets everything
     # currently free until it is stable; a trusted job does not start next to it.
     d = Driver().to(JobState.WARMING, "a").observe(1.0, "a", vram=10).submit("b")
     dec = decide(trusted_snapshot(d, "b", 20), 2.0, d.config, FifoPolicy(strict=False))

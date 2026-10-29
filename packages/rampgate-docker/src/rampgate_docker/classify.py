@@ -1,4 +1,4 @@
-"""`classify_exit`: a container's exit as a rampgate `ExitKind` (SPEC §9)."""
+"""`classify_exit`: a container's exit as a rampgate `ExitKind` (docs/adapters.md)."""
 
 from __future__ import annotations
 
@@ -66,5 +66,5 @@ def classify_exit(
     if stop_reason is not None and code in _STOP_CODES:
         return ExitKind.PREEMPTED if stop_reason is StopReason.PREEMPT else ExitKind.CANCELLED
     # Any other code, also after a requested stop: the core then decides (a FAILURE
-    # while STOPPING ends PREEMPTED/CANCELLED with Warn(UncleanStop), SPEC §3.4).
+    # while STOPPING ends PREEMPTED/CANCELLED with Warn(UncleanStop), docs/concepts.md).
     return ExitKind.FAILURE

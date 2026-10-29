@@ -1,4 +1,5 @@
-"""The pure transition function ``reduce(state, message, config) -> state`` (SPEC §3.4, §4, §5).
+"""The pure transition function ``reduce(state, message, config) -> state``
+(docs/concepts.md, docs/algorithm.md).
 
 ``reduce`` applies both input events and the actions a decision emitted:
 
@@ -403,7 +404,7 @@ def _job_observed(state: State, ev: JobObserved, config: Config) -> State:
 def _rebaseline(
     baseline: int | None, latest: int | None, value: int | None
 ) -> tuple[int | None, int | None]:
-    """Track a cumulative counter per attempt (SPEC §3.5): first value and decreases re-baseline."""
+    """Track a cumulative counter per attempt: first value and decreases re-baseline."""
     if value is None:
         return baseline, latest
     if latest is None or value < latest:
@@ -449,7 +450,7 @@ def _job_exited(state: State, ev: JobExited, config: Config) -> State:
 def _exit_while_stopping(
     state: State, rt: JobRuntime, ev: JobExited, intent: StopReason, config: Config
 ) -> State:
-    """SPEC §3.4: the real outcome decides what we learn, the stop intent what happens next.
+    """docs/concepts.md: the real outcome decides what we learn, the stop intent what happens next.
 
     Applies whenever a stop was requested, whether or not the ``Stop`` was sent yet.
     A stopped job is never re-queued and never FAILED (I13).
@@ -457,7 +458,7 @@ def _exit_while_stopping(
     if rt.vacating and intent is StopReason.PREEMPT:
         return _vacated_exit(state, rt, ev, config)
     if rt.vacating and ev.kind in (ExitKind.PREEMPTED, ExitKind.LOST):
-        # A cancel requested while Rule V was vacating the job wins (SPEC §5).
+        # A cancel requested while Rule V was vacating the job wins (docs/algorithm.md).
         return _put(state, _end_attempt(rt, JobState.CANCELLED))
     on_stop = JobState.PREEMPTED if intent is StopReason.PREEMPT else JobState.CANCELLED
     match ev.kind:
@@ -486,7 +487,7 @@ def _exit_while_stopping(
 
 
 def _vacated_exit(state: State, rt: JobRuntime, ev: JobExited, config: Config) -> State:
-    """Rule V (SPEC §5): a vacated job returns to PENDING (I13's exception) and waits until
+    """Rule V: a vacated job returns to PENDING (I13's exception) and waits until
     its observed peak really fits; an OOM is learned as Rule O says, a success is a success."""
     match ev.kind:
         case ExitKind.SUCCESS:
@@ -509,7 +510,7 @@ def _vacated_exit(state: State, rt: JobRuntime, ev: JobExited, config: Config) -
 
 
 def _isolate_if_unstable(state: State, rt: JobRuntime) -> tuple[State, JobRuntime]:
-    """Isolation retry (SPEC §5): a job that OOMed before it was stable gets the flag, with
+    """Isolation retry: a job that OOMed before it was stable gets the flag, with
     the order of this OOM."""
     if rt.reservation or rt.isolate_seq is not None:  # STABLE once: it has a reservation
         return state, rt
@@ -781,7 +782,7 @@ def _mark_stable(state: State, a: MarkStable) -> State:
 def _running_records(rt: JobRuntime, devices: Iterable[DeviceId]) -> list[HistoryRecord]:
     """Rule H: a STABLE job's observed peak, so siblings get an estimate before it finishes.
 
-    Not a lower bound: Rule S saw the ramp complete, so siblings may trust it (SPEC §5).
+    Not a lower bound: Rule S saw the ramp complete, so siblings may trust it (docs/algorithm.md).
 
     Written again with the same ``record_id`` when the reservation grows; stores
     keep the per-dimension max of a record id.

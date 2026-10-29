@@ -1,4 +1,4 @@
-"""Output actions (SPEC §3.6), each with a deterministic ``action_id``."""
+"""Output actions (docs/concepts.md), each with a deterministic ``action_id``."""
 
 from __future__ import annotations
 
@@ -105,7 +105,7 @@ class Start(_ActionMixin):
     issued_at: float
     estimate: Mapping[DeviceId, Resources | None] = field(default_factory=frozen_map)
     trusted: frozenset[DeviceId] = frozenset()
-    # Per trusted device: complete observations behind the estimate (rule A, SPEC §5).
+    # Per trusted device: complete observations behind the estimate (rule A, docs/algorithm.md).
     observations: Mapping[DeviceId, int] = field(default_factory=frozen_map)
 
 
@@ -115,7 +115,7 @@ class Stop(_ActionMixin):
     attempt: int
     reason: StopReason
     grace_s: float
-    # Rule V (SPEC §5): stopped by rampgate itself; the job returns to PENDING after exit.
+    # Rule V (docs/algorithm.md): stopped by rampgate itself; the job returns to PENDING after exit.
     vacate: bool = False
 
 
@@ -264,7 +264,7 @@ EDGE_TRIGGERED: tuple[type, ...] = (
 
 
 def warning_key(w: WarningKind) -> tuple[str, tuple[str, ...]]:
-    """``(kind, key)`` of a warning (SPEC §3.6 warning table)."""
+    """``(kind, key)`` of a warning (docs/concepts.md warning table)."""
     kind = type(w).__name__
     match w:
         case CapacityExceeded():

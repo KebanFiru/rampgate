@@ -1,4 +1,4 @@
-"""`classify_exit` decision table (SPEC §3.4 exits while STOPPING, §9)."""
+"""`classify_exit` decision table (docs/concepts.md exits while STOPPING, §9)."""
 
 from __future__ import annotations
 

@@ -1,4 +1,5 @@
-"""Run memory-hog containers on one real GPU through rampgate's Engine (SPEC §12 L5).
+"""Run memory-hog containers on one real GPU through rampgate's Engine
+(docs/real-run/assumptions.md).
 
 Usage (inside ``./dev integration``, which mounts the Docker socket and the GPU)::
 

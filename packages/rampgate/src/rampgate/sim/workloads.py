@@ -1,4 +1,4 @@
-"""Synthetic workloads: memory over time since the process started (SPEC §8)."""
+"""Synthetic workloads: memory over time since the process started (docs/simulator.md)."""
 
 from __future__ import annotations
 
@@ -97,7 +97,7 @@ class EpochEval(_Common):
 
     After ``load_s`` of loading (linear ramp to ``base``), each epoch is
     ``epoch_s`` of training followed by ``eval_s`` of evaluation. The reported
-    ``epoch`` counter is incremented *after* the evaluation, as SPEC §3.5 assumes.
+    ``epoch`` counter is incremented *after* the evaluation, as docs/concepts.md assumes.
     """
 
     base: Resources

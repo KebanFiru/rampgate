@@ -1,4 +1,5 @@
-"""Check the L5 real-hardware gates on a run log of `docker_gpu_queue.py` (SPEC §12 L5).
+"""Check the L5 real-hardware gates on a run log of `docker_gpu_queue.py`
+(docs/real-run/assumptions.md).
 
 Usage::
 

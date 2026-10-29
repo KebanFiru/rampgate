@@ -1,4 +1,4 @@
-"""Serialization (I8), the Engine API, restarts and reconciliation (SPEC §4, L3)."""
+"""Serialization (I8), the Engine API, restarts and reconciliation (docs/concepts.md, L3)."""
 
 from __future__ import annotations
 

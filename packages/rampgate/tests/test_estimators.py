@@ -1,4 +1,4 @@
-"""Estimators and history stores (SPEC §7)."""
+"""Estimators and history stores (docs/estimators.md)."""
 
 import json
 
@@ -116,7 +116,7 @@ def test_a_running_record_makes_siblings_trusted() -> None:
 
 
 def test_a_lower_bound_only_estimate_grows_like_rule_o_for_siblings() -> None:
-    # SPEC §5 (after held-out evaluation 1): "needed more than 40" is not an admission
+    # docs/algorithm.md (after held-out evaluation 1): "needed more than 40" is not an admission
     # estimate of 40. A sibling gets min(40 * oom_growth, capacity), and stays untrusted.
     est = HistoryEstimator(InMemoryHistoryStore())
     d = Driver().submit("sibling", fingerprint=("k",))
@@ -141,7 +141,7 @@ def test_a_lower_bound_only_estimate_grows_like_rule_o_for_siblings() -> None:
 
 
 def test_a_newer_lower_bound_above_a_complete_record_grows_in_its_dimensions_only() -> None:
-    # SPEC §5 (scope widened): a newer lower bound above the complete value is "more than X"
+    # Rule O (scope widened): a newer lower bound above the complete value is "more than X"
     # too. vram comes from the lower bound (40 > 36) and grows; ram comes from the complete
     # record (8 > 2) and does not.
     est = HistoryEstimator(InMemoryHistoryStore())

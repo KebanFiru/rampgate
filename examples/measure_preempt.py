@@ -1,4 +1,5 @@
-"""Measure start-up and preemption latency of a GPU memory hog (SPEC §12 L5, measured items).
+"""Measure start-up and preemption latency of a GPU memory hog
+(docs/real-run/assumptions.md, measured items).
 
 Usage (inside ``./dev integration``)::
 

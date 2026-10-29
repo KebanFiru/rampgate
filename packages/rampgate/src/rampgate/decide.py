@@ -1,4 +1,5 @@
-"""``decide(snapshot, now, config, policy, admission) -> Decision``: pure admission (SPEC §5).
+"""``decide(snapshot, now, config, policy, admission) -> Decision``: pure admission
+(docs/algorithm.md).
 
 Work is done in a fixed order on a local working copy of the state, so later
 steps see the effect of earlier ones within the same tick:
@@ -102,7 +103,7 @@ class Decision:
 
 @dataclass(frozen=True, slots=True)
 class DeviceLoad:
-    """The accounting of SPEC §5 for one device at ``now``."""
+    """The accounting of docs/algorithm.md for one device at ``now``."""
 
     capacity: Resources
     foreign: Resources
@@ -140,7 +141,7 @@ def _is_warming_like(rt: JobRuntime) -> bool:
 
 
 def _warming_load(rt: JobRuntime, d: DeviceId, config: Config) -> Resources:
-    """``W_j,d`` (SPEC §5): ``max(E * margin, usage)`` for a trusted estimate (`trusted_margin`
+    """``W_j,d`` (Rule A): ``max(E * margin, usage)`` for a trusted estimate (`trusted_margin`
     with enough observations, rule A, else `safety_margin`), otherwise ``max(E, usage)`` with
     the estimate used at admission (0 if it was unknown)."""
     usage = rt.usage.get(d, Resources())
@@ -154,7 +155,7 @@ def _warming_load(rt: JobRuntime, d: DeviceId, config: Config) -> Resources:
 
 
 def _trusted_margin(observations: int, config: Config) -> float:
-    """Rule A (SPEC §5): ``trusted_margin`` needs ``min_trusted_observations`` observations."""
+    """Rule A: ``trusted_margin`` needs ``min_trusted_observations`` observations."""
     if observations >= config.min_trusted_observations:
         return config.trusted_margin
     return config.safety_margin
@@ -378,7 +379,7 @@ def managed_load(rt: JobRuntime, d: DeviceId) -> Resources:
 
 
 def _vacate(tick: _Tick) -> None:
-    """Rule V (SPEC §5): where a ``MarkStable``/``UpdateReservation`` left
+    """Rule V (docs/algorithm.md): where a ``MarkStable``/``UpdateReservation`` left
     ``U_d > C * (1 - vacate_headroom)``, stop the newest admitted STABLE jobs until it fits.
     A ramping job is never a victim (it keeps growing while it stops), and the last
     non-stopping managed job on a device is never vacated."""
@@ -412,7 +413,7 @@ def _vacate(tick: _Tick) -> None:
 
 
 def _isolation_holders(state: State) -> dict[DeviceId, JobId]:
-    """Per device, the waiting isolation job with the oldest OOM requeue (SPEC §5)."""
+    """Per device, the waiting isolation job with the oldest OOM requeue (docs/algorithm.md)."""
     holders: dict[DeviceId, JobId] = {}
     waiting = [
         rt
@@ -428,7 +429,7 @@ def _isolation_holders(state: State) -> dict[DeviceId, JobId]:
 def _isolation_wait(
     state: State, rt: JobRuntime, isolating: Mapping[DeviceId, JobId]
 ) -> Explanation | None:
-    """Why an isolation retry, or a job on a device it holds, cannot start (SPEC §5)."""
+    """Why an isolation retry, or a job on a device it holds, cannot start (docs/algorithm.md)."""
     taken = [d for d in rt.job.devices if isolating.get(d, rt.id) != rt.id]
     if taken:
         return DeviceHeldFor(taken[0], isolating[taken[0]])
@@ -489,7 +490,7 @@ def _admit(tick: _Tick, policy: OrderingPolicy, admission: Admission) -> None:  
             if trust_mode and estimates[d] is not None and tick.snapshot.is_trusted(rt, d)
         )
         # An untrusted warming job holds its device against every start, trusted ones too:
-        # its peak is unknown, so it gets everything currently free (SPEC §5, I17).
+        # its peak is unknown, so it gets everything currently free (docs/algorithm.md, I17).
         probation = [d for d in devices if d in warming] if admission.probation else []
         no_fit = [
             d

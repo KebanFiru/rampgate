@@ -1,4 +1,4 @@
-"""Input events (SPEC §3.5)."""
+"""Input events (docs/concepts.md)."""
 
 from __future__ import annotations
 
@@ -102,7 +102,7 @@ class JobExited:
 class JobObserved:
     """Usage of one job on one device at time ``t``.
 
-    ``steps`` is the job's own cumulative counter (SPEC §3.5). ``attempt`` is an
+    ``steps`` is the job's own cumulative counter (docs/concepts.md). ``attempt`` is an
     optional extension: adapters that know the attempt (e.g. from a container
     label) should pass it so late samples of a past attempt are recognized
     exactly; ``None`` means "the current attempt".

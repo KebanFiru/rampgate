@@ -1,6 +1,6 @@
 # Algorithm
 
-`decide(snapshot, now)` is pure: the same state and time always give the same decision. The full definition is in the repository's `SPEC.md` §5; this page is the short version. Every threshold is a field of `Config`.
+`decide(snapshot, now)` is pure: the same state and time always give the same decision. Every threshold is a field of `Config`.
 
 ## Estimates
 

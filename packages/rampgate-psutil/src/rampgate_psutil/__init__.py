@@ -1,4 +1,4 @@
-"""Host RAM/CPU probe for rampgate (psutil), SPEC §9.
+"""Host RAM/CPU probe for rampgate (psutil), docs/adapters.md.
 
 - `HostProbe` reports the host as one rampgate device: its capacity
   (`device`), its total usage (`sample`, a `DeviceObserved`) and the usage of

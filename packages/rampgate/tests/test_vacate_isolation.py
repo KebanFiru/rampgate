@@ -1,4 +1,4 @@
-"""Rule V (vacate) and the isolation retry (SPEC §5, after held-out evaluation 1)."""
+"""Rule V (vacate) and the isolation retry (docs/algorithm.md, after held-out evaluation 1)."""
 
 from typing import Any
 

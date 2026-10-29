@@ -1,4 +1,4 @@
-"""Rule S (stability) and peak-growth detection (SPEC §5). Pure functions."""
+"""Rule S (stability) and peak-growth detection (docs/algorithm.md). Pure functions."""
 
 from __future__ import annotations
 

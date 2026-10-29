@@ -1,4 +1,4 @@
-"""Rule O (OOM feedback), SPEC §5."""
+"""Rule O (OOM feedback), docs/algorithm.md."""
 
 import pytest
 

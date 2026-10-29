@@ -13,7 +13,7 @@ rampgate is an **observation-based admission scheduler** packaged as a small, em
 
 All benchmark results are from rampgate's deterministic simulator. Demonstrated (not benchmarked) on one laptop GPU (RTX 4050, 6 GB) with synthetic memory-hog containers: probation, a Rule V vacate and an OOM→Rule O cycle, checked by script. Not yet tested: multiple GPUs, gang jobs, CPU devices, a real framework's caching allocator, orchestrator restart, sub-second spikes. See [docs/real-run/assumptions.md](docs/real-run/assumptions.md) for what the real runs confirmed and contradicted.
 
-**Status:** pre-alpha, under construction (phases L0–L3 of [SPEC.md](SPEC.md) done: model, reducer, `decide`, policies, estimators, `Engine` with persistence, and a minimal simulator; L5: the `rampgate-nvml`, `rampgate-psutil` and `rampgate-docker` adapters). L4 gates: failed on the first held-out evaluation (freeze-1, 6 OOMs); met on the second held-out set (freeze-2, seeds 2000–2019) after the fixes listed in Methodology. Not on PyPI yet.
+**Status:** pre-alpha (model, reducer, `decide`, policies, estimators, `Engine` with persistence, the simulator, and the `rampgate-nvml`, `rampgate-psutil` and `rampgate-docker` adapters). L4 gates: failed on the first held-out evaluation (freeze-1, 6 OOMs); met on the second held-out set (freeze-2, seeds 2000–2019) after the fixes listed in Methodology. Not on PyPI yet.
 
 ## Quickstart
 
@@ -50,9 +50,9 @@ Three jobs ramp one at a time (probation) and are reserved at their observed pea
 
 ## Benchmark
 
-Simulated GPU cluster, six scenarios (SPEC §8): (a) small jobs, (b) a mixed queue, (c) a late eval spike, (d_over) over-declared hints, (d_under) under-declared hints, (e) a training queue. rampgate's rows (`Probation`, cold and warm history) are compared with three baselines: `GreedyFree` (start whenever free memory looks sufficient), `DeclaredReservation` (reserve the declared hint) and `Serial` (one job per device). The acceptance criteria (SPEC §12, L4) were fixed before measuring. Every OOM of a rampgate row that is not a **first-contact** OOM (an OOM next to a first-attempt job that is still ramping and has no observation-based estimate) counts as a bug. No job may be OOM-killed twice on the same device.
+Simulated GPU cluster, six scenarios ([Simulator](docs/simulator.md)): (a) small jobs, (b) a mixed queue, (c) a late eval spike, (d_over) over-declared hints, (d_under) under-declared hints, (e) a training queue. rampgate's rows (`Probation`, cold and warm history) are compared with three baselines: `GreedyFree` (start whenever free memory looks sufficient), `DeclaredReservation` (reserve the declared hint) and `Serial` (one job per device). The acceptance criteria (the L4 gates) were fixed before measuring. Every OOM of a rampgate row that is not a **first-contact** OOM (an OOM next to a first-attempt job that is still ramping and has no observation-based estimate) counts as a bug. No job may be OOM-killed twice on the same device.
 
-Each table comes from a single run on **held-out seeds**, made once on a frozen git tag. The numbers are generated from the committed `results.json` (`docs/benchmark/freeze-N/heldout/`), which also holds the ablation, sensitivity and `trusted_margin` tables and the plots. The pre-registration of both freezes is evidenced only by local git history; see [Methodology](#methodology).
+Each table comes from a single run on **held-out seeds**, made once on a frozen git tag. The numbers are generated from the committed `results.json` (`docs/benchmark/freeze-N/heldout/`), which also holds the ablation, sensitivity and `trusted_margin` tables and the plots. The pre-registration of both freezes is kept in a private design document; see [Methodology](#methodology).
 
 ### Summary: the price of safety
 
@@ -107,7 +107,7 @@ How to read it:
 - In `e_trainq`, `GreedyFree` has no OOMs either, so rampgate's extra makespan (1.20× warm, 1.50× cold) buys nothing there.
 - In `d_over_declared`, rampgate and the OOM-free `DeclaredReservation` both take about 1.6× `GreedyFree`'s makespan, and rampgate is slightly faster (0.95×).
 
-**Target (reported, not a gate): warm `Probation` median makespan ≤ 1.2 × `GreedyFree` median makespan** (ratio of medians, as in SPEC §12, so it differs slightly from the per-seed ratios above). Missed in four of six scenarios on freeze 2, and in two of six on freeze 1:
+**Target (reported, not a gate): warm `Probation` median makespan ≤ 1.2 × `GreedyFree` median makespan** (ratio of medians, so it differs slightly from the per-seed ratios above). Missed in four of six scenarios on freeze 2, and in two of six on freeze 1:
 
 | Scenario | Freeze 1 (seeds 1000–1019) | Freeze 2 (seeds 2000–2019) |
 |---|---|---|
@@ -124,7 +124,7 @@ The two columns come from different seed sets, so the difference between them is
 
 The primary result. `--check` **failed** on 6 runs: 6 OOMs of cold `Probation` that are not first-contact, 2 in (b) on seeds 1002 and 1008 and 4 in (c) on seeds 1005, 1009, 1013 and 1016 (in bold below). Diagnosis: [`docs/benchmark/freeze-1/heldout-failures.md`](docs/benchmark/freeze-1/heldout-failures.md).
 
-Seeds 1000–1019 (20), tag `bench-freeze-1`, commit `a344912`. Cells: median [Q1–Q3] over seeds; OOM columns other than the median are totals over all seeds.
+Seeds 1000–1019 (20), tag `bench-freeze-1`, commit `53be4cd` (originally `a344912`, see Methodology). Cells: median [Q1–Q3] over seeds; OOM columns other than the median are totals over all seeds.
 
 | Scenario | Strategy | Makespan (s) | OOMs / run | First-contact OOMs (total) | Other OOMs (total) | Repeat-device OOMs (total) | Lost work (step-s) |
 |---|---|---|---|---|---|---|---|
@@ -165,7 +165,7 @@ Seeds 1000–1019 (20), tag `bench-freeze-1`, commit `a344912`. Cells: median [Q
 
 These are the changes made after freeze 1 failed (see Methodology): lower-bound estimates grow by `oom_growth`, an untrusted warming job holds its device (I17), Rule V vacates STABLE jobs when a device is physically overcommitted, and the isolation retry. `--check` **passed**: every rampgate row has 0 OOMs that are not first-contact and 0 repeat-device OOMs, on all 20 seeds. The development seeds 0–49 pass as well ([`docs/benchmark/freeze-2/dev/`](docs/benchmark/freeze-2/dev/results.md)).
 
-Seeds 2000–2019 (20), tag `bench-freeze-2`, commit `d810c06`. Cells: median [Q1–Q3] over seeds; OOM columns other than the median are totals over all seeds.
+Seeds 2000–2019 (20), tag `bench-freeze-2`, commit `c14ffc0` (originally `d810c06`, see Methodology). Cells: median [Q1–Q3] over seeds; OOM columns other than the median are totals over all seeds.
 
 | Scenario | Strategy | Makespan (s) | OOMs / run | First-contact OOMs (total) | Other OOMs (total) | Repeat-device OOMs (total) | Lost work (step-s) |
 |---|---|---|---|---|---|---|---|
@@ -211,71 +211,74 @@ Seeds 2000–2019 (20), tag `bench-freeze-2`, commit `d810c06`. Cells: median [Q
 | Isolation wait (total, s) | 12,426 | 576 | 5,921 |
 | Runs where Overcommitted fired | 19/20 | 18/20 | 19/20 |
 
-The Overcommitted warning fires in most runs. This is a known v0.2 issue: admission reserves `E × trusted_margin` while a STABLE job reserves `peak × safety_margin`, so devices look overcommitted on paper at `MarkStable` (SPEC §13).
+The Overcommitted warning fires in most runs. This is a known v0.2 issue: admission reserves `E × trusted_margin` while a STABLE job reserves `peak × safety_margin`, so devices look overcommitted on paper at `MarkStable` (v0.2 roadmap).
 
-**Limitation of (d), under-declared.** In `d_under_declared`, hints affect only the first job of each template (hints are 0.4–0.7 of the true peak; after that the history max is used). This scenario tests under-declaration only in a narrow window. A scenario where hints stay decisive longer is a v0.2 benchmark candidate (SPEC §13).
+**Limitation of (d), under-declared.** In `d_under_declared`, hints affect only the first job of each template (hints are 0.4–0.7 of the true peak; after that the history max is used). This scenario tests under-declaration only in a narrow window. A scenario where hints stay decisive longer is a v0.2 benchmark candidate (v0.2 roadmap).
 
 ## Methodology
 
-**Protocol (SPEC §12).** Development and diagnosis use development seeds only (0–9 up to freeze 1, 0–49 since). When `--check` passes on them and every regression test passes, the configuration is frozen as the git tag `bench-freeze-N`. Held-out set N (seeds `1000·N … 1000·N + 19`, warm stores from `10 000 + 1000·N`) has never been run before; it is run **once** on the tag. A failed criterion is not relaxed. Its result stays as it is, its failures may be diagnosed on their traces, and the failing (scenario, seed) pairs become regression tests. A held-out set is never reported again after it is spent. The tag is made before its run and published at release.
+**Protocol.** Development and diagnosis use development seeds only (0–9 up to freeze 1, 0–49 since). When `--check` passes on them and every regression test passes, the configuration is frozen as the git tag `bench-freeze-N`. Held-out set N (seeds `1000·N … 1000·N + 19`, warm stores from `10 000 + 1000·N`) has never been run before; it is run **once** on the tag. A failed criterion is not relaxed. Its result stays as it is, its failures may be diagnosed on their traces, and the failing (scenario, seed) pairs become regression tests. A held-out set is never reported again after it is spent. The tag is made before its run and published at release.
 
-**Pre-registration.** `bench-freeze-1` and `bench-freeze-2` were tagged locally and not published before results were read; pre-registration is evidenced only by local git history and is not independently verifiable.
+**Pre-registration.** The pre-registration (acceptance criteria, change notes, freeze protocol) lives in a private design document. The repository history was rewritten on 2026-10-29 before first publication to remove it. The original history is kept in a private archive; original freeze commits: `bench-freeze-1` `a3449125be65812bbbb9245908466ccfc79f33c1`, `bench-freeze-2` `d810c0683d2e254031727ec92375382fe0bdf471`. It can be shared with reviewers on request, and these hashes let anyone verify it wasn't altered. Both tags were made locally and not published before their results were read, so the timing below is not independently verifiable.
 
 | | `bench-freeze-1` | `bench-freeze-2` |
 |---|---|---|
-| Tag → commit | `d32ec95` → `a344912` | `abb4338` → `d810c06` |
+| Tag → commit | `40cd68a` → `53be4cd` | `4ea5332` → `c14ffc0` |
+| Original tag → commit (private archive) | `d32ec95` → `a344912` | `abb4338` → `d810c06` |
 | Tag created | 2026-10-27 13:13:35 +03:00 | 2026-10-28 10:32:00 +03:00 |
 | Held-out run started | 2026-10-27 13:13:39 +03:00 | 2026-10-28 10:32:05 +03:00 |
 | Results first read | 2026-10-27 14:32:52 +03:00 | 2026-10-28 12:23:12 +03:00 |
 
-Until 2026-10-28 the protocol required pushing the tag to GitHub before its run. That rule was dropped while freeze 2's run was in progress, before its results were read, because the project stays local until release (SPEC §12).
+Until 2026-10-28 the protocol required pushing the tag to GitHub before its run. That rule was dropped while freeze 2's run was in progress, before its results were read, because the project stays local until release.
 
-**Changes made after results were first seen** (the first benchmark results were seen after `b536289`, 2026-10-21):
+**Changes made after results were first seen** (the first benchmark results were seen after `c37de39`, 2026-10-21). Hashes are after the history rewrite; *private* marks a commit that changed only the design document and exists only in the original history, under the original hash shown. [History rewrite](docs/benchmark/history-rewrite.md) maps every hash to its original:
 
 *After the first development-seed results, before freeze 1 (2026-10-22):*
 
 | Commit | Change |
 |---|---|
-| `3770684` | `HintExceeded` warning when observed usage exceeds the declared hint. |
-| `d9df625` | Clarified "first-contact OOM": a declared hint is not an observation (written after results were seen). |
-| `52a67d0` | Added OOM kills per job and the repeat-OOM gate (a stricter criterion, added after results). |
-| `5a5a081` | The L4 gates cover the `main` and `warm` groups; the sensitivity sweep is reported only. |
-| `d524f17` | Fix: an OOM lower bound alone never makes an estimate trusted. |
-| `4ccf181` | SPEC for d524f17. |
-| `bd4edf5` | Changelog for d524f17. |
-| `72de3ca` | SPEC: a separate `trusted_margin` (1.05) for trusted warming jobs. |
-| `67d38b0` | `Config.trusted_margin` (default 1.05). |
-| `10b959f` | History keeps arrival order, so an older lower bound never overrides a later success. |
-| `b11a885` | Bench tooling: `trusted_margin` sweep, Pareto plots, warm-vs-cold diagnosis, `--seed-start` / `--commit`. |
-| `d7955b0` | Protocol: development seeds 0–9, held-out seeds 1000–1019, freeze tag. |
-| `c1629e8` | SPEC for rule A, rationale written before measuring. |
-| `a344912` | Rule A: `trusted_margin` only with ≥ 3 observations. **Tagged `bench-freeze-1`.** |
+| `ad61631` | `HintExceeded` warning when observed usage exceeds the declared hint. |
+| `06e63b5` | Clarified "first-contact OOM": a declared hint is not an observation (written after results were seen). |
+| `955755e` | Added OOM kills per job and the repeat-OOM gate (a stricter criterion, added after results). |
+| private (`5a5a081`) | The L4 gates cover the `main` and `warm` groups; the sensitivity sweep is reported only. |
+| `f62cc5c` | Fix: an OOM lower bound alone never makes an estimate trusted. |
+| private (`4ccf181`) | Design document for f62cc5c. |
+| `a914674` | Changelog for f62cc5c. |
+| private (`72de3ca`) | Design document: a separate `trusted_margin` (1.05) for trusted warming jobs. |
+| `8597a89` | `Config.trusted_margin` (default 1.05). |
+| `80dcba8` | History keeps arrival order, so an older lower bound never overrides a later success. |
+| `9ed3e1a` | Bench tooling: `trusted_margin` sweep, Pareto plots, warm-vs-cold diagnosis, `--seed-start` / `--commit`. |
+| private (`d7955b0`) | Protocol: development seeds 0–9, held-out seeds 1000–1019, freeze tag. |
+| private (`c1629e8`) | Design document for rule A, rationale written before measuring. |
+| `53be4cd` | Rule A: `trusted_margin` only with ≥ 3 observations. **Tagged `bench-freeze-1`.** |
 
 *After held-out evaluation 1, before freeze 2 (2026-10-27):*
 
 | Commit | Change |
 |---|---|
-| `662b523` | Recorded the freeze-1 held-out results unchanged. |
-| `15b4bdd` | Plots carry tag, commit and seed set and are redrawn from `results.json`. |
-| `d608f72` | Freeze-1 held-out plots and failure traces. |
-| `f9e0dee` | SPEC: lower-bound-only estimates grow by `oom_growth`, rationale before measuring. |
-| `a3685b4` | Lower-bound-only estimates grow by `oom_growth` for admission. |
-| `61ebe13` | SPEC: an untrusted warming job holds its device against every start (I17). |
-| `2713a83` | An untrusted warming job holds its device against every start (I17). |
-| `5ade0ce` | The six freeze-1 held-out failures as regression tests (replayed, not reported). |
-| `9aa0195` | Protocol: freeze-N, a new held-out set per freeze, development seeds 0–49. |
-| `732837a` | SPEC: every dimension whose estimate is a lower bound grows (scope widened before measuring). |
-| `c45c628` | Grow every estimate dimension that comes from a lower bound. |
-| `e75c280` | Diagnosis tooling: `--only` pairs, `--all-ooms`. |
-| `1b85ced` | Diagnosis: check that Overcommitted was active at freeze-1's (c) OOMs. |
-| `61f58bd` | SPEC: Rule V (vacate), isolation retry, I18/I19, I13 exception, new reported metrics, v0.2 roadmap note. |
-| `101e77e` | SPEC: Rule V vacates STABLE jobs only, triggered by `MarkStable` / `UpdateReservation`. |
-| `5c690db` | Rule V and the isolation retry; state schema v4. |
-| `0273869` | Report Rule V vacates, isolation wait and Overcommitted warnings (not gated). |
-| `5153dea` | Development-seed failures found before freeze 2 (b_mixed 36, d_under 36, b_mixed 19) as regression tests. |
-| `d810c06` | SPEC roadmap: a v0.2 scenario where hints stay decisive longer. **Tagged `bench-freeze-2`.** |
+| `820dbef` | Recorded the freeze-1 held-out results unchanged. |
+| `47215ef` | Plots carry tag, commit and seed set and are redrawn from `results.json`. |
+| `18dd8cb` | Freeze-1 held-out plots and failure traces. |
+| private (`f9e0dee`) | Design document: lower-bound-only estimates grow by `oom_growth`, rationale before measuring. |
+| `3b0d6e2` | Lower-bound-only estimates grow by `oom_growth` for admission. |
+| private (`61ebe13`) | Design document: an untrusted warming job holds its device against every start (I17). |
+| `f64b570` | An untrusted warming job holds its device against every start (I17). |
+| `c73f284` | The six freeze-1 held-out failures as regression tests (replayed, not reported). |
+| `13a916f` | Protocol: freeze-N, a new held-out set per freeze, development seeds 0–49. |
+| private (`732837a`) | Design document: every dimension whose estimate is a lower bound grows (scope widened before measuring). |
+| `2867ed7` | Grow every estimate dimension that comes from a lower bound. |
+| `8b91a62` | Diagnosis tooling: `--only` pairs, `--all-ooms`. |
+| `1fa0e03` | Diagnosis: check that Overcommitted was active at freeze-1's (c) OOMs. |
+| private (`61f58bd`) | Design document: Rule V (vacate), isolation retry, I18/I19, I13 exception, new reported metrics, v0.2 roadmap note. |
+| private (`101e77e`) | Design document: Rule V vacates STABLE jobs only, triggered by `MarkStable` / `UpdateReservation`. |
+| `daa0f59` | Rule V and the isolation retry; state schema v4. |
+| `a3fd805` | Report Rule V vacates, isolation wait and Overcommitted warnings (not gated). |
+| `c14ffc0` | Development-seed failures found before freeze 2 (b_mixed 36, d_under 36, b_mixed 19) as regression tests. **`bench-freeze-2` after the rewrite.** |
+| private (`d810c06`) | Design document roadmap: a v0.2 scenario where hints stay decisive longer. **Originally tagged `bench-freeze-2`** (no code change: the rewritten tag points at its parent `c14ffc0`, same code tree). |
 
-*After held-out evaluation 2:* the freeze-2 results recorded unchanged; the README's benchmark, status and prior-art sections and this Methodology section; SPEC §12's publishing rule and its record of publication, including a correction (SPEC used to say `bench-freeze-1` was pushed after its results; it has never been pushed).
+*After held-out evaluation 2:* the freeze-2 results recorded unchanged; the README's benchmark, status and prior-art sections and this Methodology section; the design document's publishing rule and its record of publication, including a correction (it used to say `bench-freeze-1` was pushed after its results; it has never been pushed).
+
+*Before first publication (2026-10-29):* the history was rewritten to remove the design document ([History rewrite](docs/benchmark/history-rewrite.md)). The rewrite changes no code: every commit keeps its tree minus `SPEC.md`. Its follow-up commit changes no behaviour: it replaces the references to `SPEC.md` (in code, only comments, docstrings and benchmark report headings), publishes the invariants as [docs/invariants.md](docs/invariants.md), and maps old commit hashes to new ones. The frozen records keep their original hashes.
 
 ## Prior art
 

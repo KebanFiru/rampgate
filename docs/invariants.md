@@ -1,0 +1,25 @@
+# Invariants
+
+The test suite checks these properties on hypothesis-generated event sequences run through the simulator (`packages/rampgate/tests/test_invariants.py`). The `ci` hypothesis profile runs on every push and pull request; the `nightly` profile generates at least 200 scenarios. Code and tests refer to them by number.
+
+- **I1** Never two **untrusted** WARMING/STARTING jobs on the same device (with `probation="all"`: never two WARMING/STARTING jobs).
+- **I2** Without `force`: at every `Start`, `F + Σ stable reservations + Σ_warming W + estimate ≤ capacity` on each placement device, with `W` as in [Rule A](algorithm.md#rule-a-admission) (an unknown estimate counts as `unknown_min_free`).
+- **I3** `StagePolicy` with backfill off: no job of group k+1 is started while group k is incomplete.
+- **I4** `decide` is deterministic: the same snapshot and `now` give the same decision.
+- **I5** Idempotence: after reducing a decision's actions, an immediate second `decide` emits no duplicate `Start`/`Stop`.
+- **I6** A reservation never decreases within an attempt.
+- **I7** OOM retries are bounded, and the estimate strictly increases after each OOM until it is capped at capacity. This holds even with no hint, no history and no observations. A job gets `Fail(EXCEEDS_DEVICE_CAPACITY)` only if it OOMed while it had effectively the whole device (`room_at_oom ≥ capacity × (1 − foreign_tolerance)` in an OOM'd dimension).
+- **I8** `dump` / `load` round-trips to an equal state.
+- **I9** A gang job starts on all of its devices or on none.
+- **I10** A PREEMPTED job keeps its group open, and resuming a job whose earlier attempt ran always sets `resume=True` (a job held while PENDING never ran, so it starts with `resume=False`; see [Lifecycle](concepts.md#lifecycle)).
+- **I11** Replaying any prefix of an already-applied stream of **fact events** (`JobSubmitted`, `JobStarted`, `JobExited`, `JobObserved`, `DeviceObserved`: duplicates, stale attempts, out-of-order observations) leaves the state unchanged except for the `ignored_events` log.
+- **I11b** Every **command** is idempotent when applied twice in a row: `Paused; Paused` == `Paused`, `PreemptRequested; PreemptRequested` == `PreemptRequested`, an identical `JobUpdated` twice == once, and likewise for the other commands. Commands carry no event ids.
+- **I12** LOST retries are bounded, and a LOST exit never changes the OOM counter or the estimate.
+- **I13** A job that exits while STOPPING is never re-queued automatically. It ends in SUCCEEDED, PREEMPTED or CANCELLED, never FAILED. *Exception (Rule V):* a job stopped by `Stop(vacate=True)`, with no user preempt or cancel request since, returns to PENDING with `Requeue(VACATED)` (or ends SUCCEEDED).
+- **I14** Rule S depends only on `steps_in_attempt` (and `epoch_in_attempt`). The same workload resumed with a cumulative counter or with a counter reset to 0 stabilizes at the same simulated time.
+- **I15** With head-of-line blocking on, a job never starts on device `d` in a tick where an earlier blocking candidate needing `d` was not admitted, *except* on a device whose isolation holder is that job (an isolation hold takes precedence over head-of-line holds; see [Isolation retry](algorithm.md#isolation-retry)).
+- **I16** For every edge-triggered warning key, `Warn` and `WarnCleared` strictly alternate in the emitted action stream, starting with `Warn`.
+- **I17** With Rule P on: while an **untrusted** job is STARTING/WARMING on device `d` (or keeps `d`'s slot in the tick it became STABLE), no `Start` is issued on `d`, for trusted and untrusted jobs alike (`force` skips Rule A only, not Rule P). Checked against the state within the tick, including starts made earlier in the same tick.
+- **I18** With Rule V on: after `decide`, on every device where a `MarkStable` or `UpdateReservation` happened in the tick, one of these holds over the non-stopping managed jobs on `d`: `U_d ≤ C_d × (1 − vacate_headroom)`; or at most one of them remains; or none of them is STABLE. Every job this `decide` stopped with `vacate=True` was STABLE.
+- **I19** At the `Start` of a job with the isolation flag, no other managed job is STARTING/WARMING/STABLE/STOPPING on any device of its placement (checked against the state within the tick); and no `Start` is issued on a device held by a waiting isolation job other than that job itself.
+- **I20** *(liveness)* In every tick, on a device `d` with no active managed job and the engine not paused, every PENDING job whose placement includes `d` is started in that tick or waits for a reason that is not a scheduler hold (capacity, foreign usage, unknown estimate, group barrier, admission, a user hold). A `DeviceHeldFor(d', h)` is allowed when the chain of holders it starts ends in such a reason; a **cycle** of holds is a violation. `WaitingForWarmup` / `WaitingForIsolation` count only on a device that has an active job or a start in that tick. Checked for every policy (`FifoPolicy` strict and not, `PriorityPolicy`, `StagePolicy`), with and without restarts, and for the baselines.

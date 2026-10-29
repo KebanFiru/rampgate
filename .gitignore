@@ -19,3 +19,6 @@ site/
 # local scratch: diagnostics, benchmark runs, worktrees
 .diag/
 .bench-*/
+
+# private design document, kept outside the repository
+SPEC.md

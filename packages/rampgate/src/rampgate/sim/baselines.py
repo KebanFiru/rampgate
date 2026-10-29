@@ -1,4 +1,4 @@
-"""Baseline and ablation strategies for the benchmark (SPEC §8).
+"""Baseline and ablation strategies for the benchmark (docs/simulator.md).
 
 Every strategy runs on the same Engine and reducer; only the admission step of
 ``decide`` (and the config) differs. An OOM'd job is requeued with
@@ -176,7 +176,7 @@ ABLATIONS = (
     Strategy("rampgate - history", estimator="null"),
 )
 TRUSTED_MARGINS = (1.00, 1.05, 1.10, 1.15)
-# Reported only (SPEC §5): the default trusted_margin is not picked from this sweep.
+# Reported only (docs/algorithm.md): the default trusted_margin is not picked from this sweep.
 MARGIN_SWEEP = tuple(
     Strategy(
         f"Probation{suffix} [trusted_margin={m:.2f}]", config=Config(trusted_margin=m), warm=warm

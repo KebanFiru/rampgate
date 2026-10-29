@@ -1,4 +1,4 @@
-"""`PriorityPolicy`: higher priority first, with optional aging (SPEC §6)."""
+"""`PriorityPolicy`: higher priority first, with optional aging (docs/policies.md)."""
 
 from __future__ import annotations
 
