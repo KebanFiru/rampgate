@@ -6,6 +6,7 @@ Measured on the development machine on 2026-10-28:
 - **Containers and OS:** Docker 29.9 with the NVIDIA runtime, cgroup v2 (systemd driver), Fedora 43 with SELinux enforcing.
 - **Workload:** the memory hog `docker/hog/hog.py`, which allocates GPU memory in 64 MiB chunks through the CUDA driver API.
 - **What this is:** a demonstration, not a benchmark. The Engine ran with the default `Config` of each run's commit.
+- **Evidence:** each run's `run.jsonl` (every event, action, probe sample and exit classification) and `scenario.json`. `examples/check_run_log.py` checks the gates on them; its output for the three runs is in [`check-output.txt`](check-output.txt). The hogs' raw container logs are not published; the lines used here (for example the OOM message) are also in `run.jsonl`.
 
 ## Runs
 

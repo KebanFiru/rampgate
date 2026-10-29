@@ -1,0 +1,51 @@
+# Output of examples/check_run_log.py on the three recorded runs
+#
+# Regenerated on 2026-10-29 from the recorded run.jsonl files (unchanged since the runs).
+# The staged runs are checked with --gates (exit 1 unless every gate holds). The unstaged
+# run is report-only: nothing was staged, so its [FAIL] lines mean "did not occur", and it
+# exits 0.
+
+$ python examples/check_run_log.py docs/real-run/runs/staged-20261028-103628/run.jsonl --gates
+run staged-20261028-103628, commit c0c0c0eeb4e673cf10b4bdc6e3702ba1a9780964, rampgate 0.1.0.dev0
+finished: all jobs terminal at t=695
+final states: A=SUCCEEDED#2, X=SUCCEEDED#1, Y=SUCCEEDED#3
+Rule V vacates: 2; Overcommitted warnings: 2; requeues: Y->2 (VACATED), Y->3 (VACATED), A->2 (OOM)
+exit A#1 at t=422: code 1, OOMKilled False, classified OOM; log: RuntimeError: CUDA out of memory: cuMemAlloc of 64 MiB failed (CUDA_ERROR_OUT_OF_MEMORY) while holding 2176 MiB (steps)
+
+[PASS] Probation
+    Y held at t=0 (WaitingForWarmup on X#1); X STABLE at t=84; Y started at t=85
+[PASS] Rule V
+    Stop(vacate=True) Y#1 at t=190; exit: PREEMPTED at t=192; Requeue(VACATED): t=193; restart: #2 at t=201 resume=True
+[PASS] OOM -> Rule O
+    OOM exit A#1 at t=422: estimate at Start 1282 MiB (trusted), Requeue(OOM) new_estimate 2662 MiB; later attempt SUCCEEDED: True
+[exit code 0]
+
+$ python examples/check_run_log.py docs/real-run/runs/unstaged-20261028-121757/run.jsonl 
+run unstaged-20261028-121757, commit 8dca1f2ba5eaab8b7bfc54d3c17c89b2223db9fa, rampgate 0.1.0.dev0
+finished: all jobs terminal at t=460
+final states: u1-small=SUCCEEDED#1, u2-eval=SUCCEEDED#1, u3-medium=SUCCEEDED#1, u4-large=SUCCEEDED#1
+Rule V vacates: 0; Overcommitted warnings: 1; requeues: none
+
+[PASS] Probation
+    u2-eval held at t=0 (WaitingForWarmup on u1-small#1); u1-small STABLE at t=67; u2-eval started at t=68
+[FAIL] Rule V
+    no Stop(vacate=True) in the log
+[FAIL] OOM -> Rule O
+    no OOM exit in the log
+[exit code 0]
+
+$ python examples/check_run_log.py docs/real-run/runs/staged-20261028-122553/run.jsonl --gates
+run staged-20261028-122553, commit 8dca1f2ba5eaab8b7bfc54d3c17c89b2223db9fa, rampgate 0.1.0.dev0
+finished: all jobs terminal at t=766
+final states: A=SUCCEEDED#2, X=SUCCEEDED#1, Y=SUCCEEDED#2
+Rule V vacates: 1; Overcommitted warnings: 1; requeues: Y->2 (VACATED), A->2 (OOM)
+exit A#1 at t=421: code 1, OOMKilled False, classified OOM; log: RuntimeError: CUDA out of memory: cuMemAlloc of 64 MiB failed (CUDA_ERROR_OUT_OF_MEMORY) while holding 2176 MiB (steps)
+
+[PASS] Probation
+    Y held at t=0 (WaitingForWarmup on X#1); X STABLE at t=83; Y started at t=84
+[PASS] Rule V
+    Stop(vacate=True) Y#1 at t=192; exit: PREEMPTED at t=194; Requeue(VACATED): t=195; restart: #2 at t=302 resume=True
+[PASS] OOM -> Rule O
+    OOM exit A#1 at t=421: estimate at Start 1282 MiB (trusted), Requeue(OOM) new_estimate 2725 MiB; later attempt SUCCEEDED: True
+[exit code 0]
+

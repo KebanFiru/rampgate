@@ -22,3 +22,6 @@ site/
 
 # private design document, kept outside the repository
 SPEC.md
+
+# real-hardware runs: the hogs' raw container logs stay private
+docs/real-run/runs/*/hog-logs/

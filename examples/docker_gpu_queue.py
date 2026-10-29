@@ -17,7 +17,8 @@ Each tick (every ``--tick`` seconds of wall time):
 Everything goes to a JSONL log (``--out``/``run.jsonl``): every event, action,
 explanation change and job state change, the raw probe samples, the executor's
 own log (when a SIGTERM was actually sent) and each exit's classification. The
-hogs' full logs are saved next to it. `check_run_log.py` checks the L5 gates on it.
+hogs' full logs are saved next to it (in ``hog-logs/``, not committed).
+`check_run_log.py` checks the L5 gates on it.
 
 The Engine runs with the default `Config` of the commit under test. A scenario
 may stage conditions only through inputs: the hogs' workload profiles, submit
