@@ -44,24 +44,28 @@ def is_stable(
     """Rule S: may this WARMING job be marked STABLE at ``now``?
 
     Never while `below_usage_floor` names a device (``floors``: each device's
-    ``stable_min_usage``; ``max_warmup_s`` does not override this). Otherwise
-    ``now - warm_start >= min_warmup_s`` and either
+    ``stable_min_usage``; ``max_warmup_s`` does not override this). Warm-up starts at
+    ``warm_start``, or for a job held back by the floor at ``floor_crossed_t`` (the time
+    before was data loading). Then ``now - start >= min_warmup_s`` and either
     - the peak has been quiet for ``stable_window_s`` and the progress gates
       pass: ``stable_min_steps`` steps in this attempt if the job has ever
       reported steps, and (with ``stable_requires_epoch``) one full epoch in
       this attempt if it reports ``epoch`` in this attempt; or
-    - ``now - warm_start >= max_warmup_s``, which caps both gates.
+    - ``now - start >= max_warmup_s``, which caps both gates.
     """
     if rt.state is not JobState.WARMING or rt.warm_start is None:
         return False
     if floors and below_usage_floor(rt, floors):
         return False
-    warmed = now - rt.warm_start
+    start = rt.warm_start
+    if not rt.reports_steps and rt.floor_crossed_t is not None:
+        start = max(start, rt.floor_crossed_t)
+    warmed = now - start
     if warmed < config.min_warmup_s:
         return False
     if warmed >= config.max_warmup_s:
         return True
-    quiet_since = rt.warm_start
+    quiet_since = start
     if rt.last_peak_growth_t is not None:
         quiet_since = max(quiet_since, rt.last_peak_growth_t)
     if now - quiet_since < config.stable_window_s:

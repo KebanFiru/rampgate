@@ -74,7 +74,7 @@ from rampgate.model import (
     frozen_map,
 )
 from rampgate.resources import Resources
-from rampgate.stability import is_peak_growth
+from rampgate.stability import below_usage_floor, is_peak_growth
 
 __all__ = ["IgnoreReason", "IgnoredEvent", "InvalidTransition", "Message", "drain", "reduce"]
 
@@ -218,6 +218,7 @@ def _fresh_attempt() -> dict[str, Any]:
         "epoch_latest": None,
         "reservation": frozen_map(),
         "obs_sample": frozen_map(),
+        "floor_crossed_t": None,
     }
 
 
@@ -373,6 +374,14 @@ def _job_observed(state: State, ev: JobObserved, config: Config) -> State:
         epoch_baseline=epoch_baseline,
         epoch_latest=epoch_latest,
     )
+    if rt.floor_crossed_t is None and not rt.reports_steps:
+        floors = {
+            d: state.devices[d].device.stable_min_usage
+            for d in rt.job.devices
+            if d in state.devices
+        }
+        if any(not f.is_zero for f in floors.values()) and not below_usage_floor(rt, floors):
+            rt = replace(rt, floor_crossed_t=ev.t)
 
     reserved = rt.reservation.get(dev)
     if reserved is not None and new_peak.exceeds(reserved):

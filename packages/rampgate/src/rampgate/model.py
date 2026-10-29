@@ -82,9 +82,10 @@ class Device:
 
     ``stable_min_usage`` is the Rule S usage floor (SPEC §5): a job that reports no
     steps becomes STABLE on this device only after its usage here exceeded the floor
-    in some dimension. Off (``Resources()``) by default, because rampgate does not know
-    the device's units; ``rampgate_nvml.NvmlProbe`` sets 256 MiB of ``vram``. Without
-    that adapter, set it yourself (a CUDA context alone was measured at ~82 MiB).
+    in some dimension, and its warm-up counts from that crossing. Off (``Resources()``)
+    by default, because rampgate does not know the device's units;
+    ``rampgate_nvml.NvmlProbe`` sets 256 MiB of ``vram``. Without that adapter, set it
+    yourself (a CUDA context alone was measured at ~82 MiB).
     """
 
     id: DeviceId
@@ -223,6 +224,9 @@ class JobRuntime:
     # Per device, its sample counter (DeviceState.samples) when this attempt was last
     # observed there, or when it started.
     obs_sample: Mapping[DeviceId, int] = field(default_factory=frozen_map)
+    # Rule S usage floor: when this attempt, never having reported steps, first used more
+    # than the floor on all its floored devices. Its warm-up starts here, not at warm_start.
+    floor_crossed_t: float | None = None
 
     @property
     def id(self) -> JobId:

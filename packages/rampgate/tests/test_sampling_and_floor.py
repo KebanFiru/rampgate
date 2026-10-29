@@ -200,9 +200,10 @@ def test_no_usage_warning_cleared_when_the_job_starts_using_the_device() -> None
     warns = [(t, type(a).__name__) for t, a in actions if isinstance(a, Warn | WarnCleared)]
     assert warns == [(60, "Warn"), (65, "WarnCleared")]
     stable = [t for t, a in actions if isinstance(a, MarkStable)]
-    # Past max_warmup_s, which caps the quiet window: STABLE as soon as the floor is passed
-    # (the floor rules out a zero reservation; later growth gives UpdateReservation).
-    assert stable == [65]
+    # Warm-up starts at the crossing (65): quiet for stable_window_s after it, although
+    # max_warmup_s since the start has long passed.
+    assert stable == [75]
+    assert engine.state.jobs["j"].floor_crossed_t == 65
 
 
 def test_simulated_data_loading_phase_before_any_gpu_allocation() -> None:
@@ -232,6 +233,30 @@ def test_simulated_data_loading_phase_before_any_gpu_allocation() -> None:
             assert mark.reservation[GPU]["vram"] == 0  # the L5 risk: nothing reserved
 
 
+def test_slow_growth_after_data_loading_is_capped_at_crossing_plus_max_warmup() -> None:
+    """90 s of data loading, then growth that never goes quiet: STABLE at the floor
+    crossing + max_warmup_s, so the probation slot is still bounded (SPEC §5 Rule S)."""
+    growth = tuple((90.0 + 10 * k, Resources(vram=10 * 1.05**k)) for k in range(90))
+    workload = StepProfile(
+        steps=((0.0, Resources()), *growth),
+        duration_s=1200.0,
+        checkpoint_every_s=60.0,
+        reports_steps=False,
+    )
+    config = Config(min_warmup_s=30, stable_window_s=60, max_warmup_s=600)
+    stable = {}
+    for floor in (Resources(), Resources(vram=1)):
+        device = Device(GPU, Resources(vram=10_000), stable_min_usage=floor)
+        scenario = Scenario((device,), (SimJob(Job("j", {GPU: None}), workload, 0.0),))
+        trace = simulate(scenario, FifoPolicy(), config=config, max_time=900.0)
+        stable[floor["vram"]] = [
+            t.now for t in trace.ticks for a in t.decision.actions if isinstance(a, MarkStable)
+        ]
+    # The job starts at t = 1, so its loading ends (and it passes the floor) at t = 91.
+    assert stable[0] == [61.0]  # no floor: "stable" while still loading data
+    assert stable[1] == [691.0]  # never quiet: the crossing + max_warmup_s
+
+
 # -- persistence ----------------------------------------------------------------------------------
 
 
@@ -241,14 +266,14 @@ def test_v4_dump_loads_with_floor_off_and_no_samples() -> None:
     engine.observe_sample(GPU, 1.0, Resources(vram=50), {"j": JobSample(1, Resources(vram=40))})
     state = engine.state
     v5 = dump_state(state)
-    assert v5["schema_version"] == SCHEMA_VERSION == 5
+    assert v5["schema_version"] == SCHEMA_VERSION == 6
 
     def strip(node: object) -> object:
         if isinstance(node, dict):
             out = {k: strip(v) for k, v in node.items()}
             fields = out.get("f")
             if isinstance(fields, dict):
-                for name in ("stable_min_usage", "samples", "obs_sample"):
+                for name in ("stable_min_usage", "samples", "obs_sample", "floor_crossed_t"):
                     if out.get("$t") in ("Device", "DeviceState", "JobRuntime"):
                         fields.pop(name, None)
             return out
@@ -263,3 +288,27 @@ def test_v4_dump_loads_with_floor_off_and_no_samples() -> None:
     assert ds.samples == 0
     assert loaded.jobs["j"].obs_sample == {}
     assert load_state(v5) == state
+
+
+def test_v5_dump_loads_without_a_floor_crossing() -> None:
+    engine = _engine(floor=Resources(vram=256))
+    _run(engine)
+    engine.observe_sample(GPU, 1.0, Resources(vram=400), {"j": JobSample(1, Resources(vram=300))})
+    state = engine.state
+    assert state.jobs["j"].floor_crossed_t == 1.0
+
+    def strip(node: object) -> object:
+        if isinstance(node, dict):
+            out = {k: strip(v) for k, v in node.items()}
+            fields = out.get("f")
+            if out.get("$t") == "JobRuntime" and isinstance(fields, dict):
+                fields.pop("floor_crossed_t", None)
+            return out
+        if isinstance(node, list):
+            return [strip(v) for v in node]
+        return node
+
+    v5 = {"format": "rampgate.state", "schema_version": 5, "state": strip(to_data(state))}
+    loaded = load_state(v5)
+    assert loaded.jobs["j"].floor_crossed_t is None
+    assert loaded.jobs["j"] == replace(state.jobs["j"], floor_crossed_t=None)

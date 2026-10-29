@@ -34,7 +34,7 @@ A WARMING job becomes STABLE once it has warmed for `min_warmup_s`, and either:
 
 At that point it is reserved at `peak × safety_margin`.
 
-**Usage floor.** A job that reports no steps does not become STABLE on a device before its usage there exceeded the device's `stable_min_usage`. Not even `max_warmup_s` overrides this. Without the floor, a job that spends its first minute loading data, with no GPU memory yet, would be "stable" at zero and reserved nothing. At `max_warmup_s` such a job raises `NoUsageObserved` instead.
+**Usage floor.** A job that reports no steps does not become STABLE on a device before its usage there exceeded the device's `stable_min_usage`. Not even `max_warmup_s` overrides this. Without the floor, a job that spends its first minute loading data, with no GPU memory yet, would be "stable" at zero and reserved nothing. At `max_warmup_s` such a job raises `NoUsageObserved` instead. Its warm-up really starts when it passes the floor: `min_warmup_s`, the quiet window and `max_warmup_s` all count from that moment, so a job that keeps growing after a long data-loading phase is still STABLE no later than the crossing plus `max_warmup_s`.
 
 ## Rule O: OOM feedback
 

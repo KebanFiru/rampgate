@@ -28,7 +28,7 @@ __all__ = [
 ]
 
 STATE_FORMAT = "rampgate.state"
-SCHEMA_VERSION = 5
+SCHEMA_VERSION = 6
 
 
 def _v1_to_v2(payload: Any) -> Any:
@@ -95,12 +95,26 @@ def _v4_to_v5(payload: Any) -> Any:
     return payload
 
 
+def _v5_to_v6(payload: Any) -> Any:
+    """v6 adds ``JobRuntime.floor_crossed_t``; in v5 dumps it is unknown (``None``), so
+    their warm-up keeps counting from ``warm_start``."""
+    if isinstance(payload, dict):
+        out = {k: _v5_to_v6(v) for k, v in payload.items()}
+        if out.get("$t") == "JobRuntime":
+            out["f"].setdefault("floor_crossed_t", None)
+        return out
+    if isinstance(payload, list):
+        return [_v5_to_v6(v) for v in payload]
+    return payload
+
+
 # MIGRATIONS[v] upgrades a version-v ``state`` payload to version v + 1.
 MIGRATIONS: dict[int, Callable[[Any], Any]] = {
     1: _v1_to_v2,
     2: _v2_to_v3,
     3: _v3_to_v4,
     4: _v4_to_v5,
+    5: _v5_to_v6,
 }
 
 
