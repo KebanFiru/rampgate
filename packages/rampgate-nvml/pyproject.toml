@@ -4,7 +4,8 @@ version = "0.1.0"
 description = "NVIDIA GPU probe for rampgate (NVML), with process-to-container mapping."
 readme = "README.md"
 license = "Apache-2.0"
-license-files = ["LICENSE"]
+license-files = ["LICENSE", "NOTICE"]
+authors = [{ name = "Hakan Bağıç" }]
 requires-python = ">=3.11"
 dependencies = [
     "rampgate>=0.1,<0.2",

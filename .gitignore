@@ -15,3 +15,7 @@ htmlcov/
 # real-hardware runs: hog checkpoints are scratch
 docs/real-run/runs/*/ckpt/
 site/
+
+# local scratch: diagnostics, benchmark runs, worktrees
+.diag/
+.bench-*/
