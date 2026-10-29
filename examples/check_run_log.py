@@ -6,7 +6,9 @@ Usage::
     python examples/check_run_log.py docs/real-run/runs/<run>/run.jsonl [--gates]
 
 Without ``--gates`` (an unstaged run) it only reports. With ``--gates`` it exits
-1 unless every gate holds:
+1 unless every gate holds. In an unstaged run (``"staged": false`` in its
+scenario) only probation is expected, so Rule V and OOM → Rule O print
+``N/A (not staged)`` when they did not occur:
 
 - **Probation:** an untrusted job is held (``WaitingForWarmup``) while another
   untrusted job warms on the GPU, and starts only after that job is STABLE.
@@ -253,15 +255,20 @@ def main(argv: list[str] | None = None) -> int:
     for line in report(log):
         print(line)
     print()
+    meta = next(r.data for r in log if r.kind == "meta")
+    staged = bool(meta["scenario"].get("staged", True))
     results = []
-    for name, gate in (
-        ("Probation", gate_probation),
-        ("Rule V", gate_vacate),
-        ("OOM -> Rule O", gate_oom),
+    for name, gate, needs_staging in (
+        ("Probation", gate_probation, False),
+        ("Rule V", gate_vacate, True),
+        ("OOM -> Rule O", gate_oom, True),
     ):
         ok, notes = gate(log)
         results.append(ok)
-        print(f"[{'PASS' if ok else 'FAIL'}] {name}")
+        status = "PASS" if ok else "FAIL"
+        if not ok and needs_staging and not staged:
+            status = "N/A (not staged)"
+        print(f"[{status}] {name}")
         for note in notes:
             print(f"    {note}")
     if args.gates and not all(results):

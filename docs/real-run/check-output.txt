@@ -1,9 +1,8 @@
 # Output of examples/check_run_log.py on the three recorded runs
 #
 # Regenerated on 2026-10-29 from the recorded run.jsonl files (unchanged since the runs).
-# The staged runs are checked with --gates (exit 1 unless every gate holds). The unstaged
-# run is report-only: nothing was staged, so its [FAIL] lines mean "did not occur", and it
-# exits 0.
+# Staged run: conditions set up on purpose; all three gates must pass. Unstaged run: realistic mix, nothing staged; only probation is expected, so the other two gates don't apply.
+# The staged runs are checked with --gates (exit 1 unless every gate holds); the unstaged run is report-only and exits 0.
 
 $ python examples/check_run_log.py docs/real-run/runs/staged-20261028-103628/run.jsonl --gates
 run staged-20261028-103628, commit c0c0c0eeb4e673cf10b4bdc6e3702ba1a9780964, rampgate 0.1.0.dev0
@@ -28,9 +27,9 @@ Rule V vacates: 0; Overcommitted warnings: 1; requeues: none
 
 [PASS] Probation
     u2-eval held at t=0 (WaitingForWarmup on u1-small#1); u1-small STABLE at t=67; u2-eval started at t=68
-[FAIL] Rule V
+[N/A (not staged)] Rule V
     no Stop(vacate=True) in the log
-[FAIL] OOM -> Rule O
+[N/A (not staged)] OOM -> Rule O
     no OOM exit in the log
 [exit code 0]
 
