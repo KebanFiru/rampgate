@@ -12,14 +12,14 @@ Measured on the development machine on 2026-10-28:
 
 | Run | Commit | Staged | Result |
 |---|---|---|---|
-| [`staged-20261028-103628`](runs/staged-20261028-103628/) | `d0cf4ed` (orig. `c0c0c0e`) | yes | All three gates pass. **But see the harness bug below:** the Rule V trigger in this run came from inflated foreign usage. |
-| [`unstaged-20261028-121757`](runs/unstaged-20261028-121757/) | `8ca89a8` (orig. `8dca1f2`) | no | 4/4 SUCCEEDED, makespan 460 s. 0 OOMs, 0 vacates, 1 `Overcommitted` warning. Probation serialized every ramp. |
-| [`staged-20261028-122553`](runs/staged-20261028-122553/) | `8ca89a8` (orig. `8dca1f2`) | yes | The rerun with the harness fixed. **All three gates pass.** One vacate (t=192), with no second vacate. All jobs SUCCEEDED, makespan 766 s. |
-| [`preempt.json`](preempt.json) | `d6652e7` (orig. `67d7594`) | — | Start-up and preemption latency: 20 samples. |
+| [`staged-20261028-103628`](runs/staged-20261028-103628/) | `787dcaa` (orig. `c0c0c0e`) | yes | All three gates pass. **But see the harness bug below:** the Rule V trigger in this run came from inflated foreign usage. |
+| [`unstaged-20261028-121757`](runs/unstaged-20261028-121757/) | `6205a83` (orig. `8dca1f2`) | no | 4/4 SUCCEEDED, makespan 460 s. 0 OOMs, 0 vacates, 1 `Overcommitted` warning. Probation serialized every ramp. |
+| [`staged-20261028-122553`](runs/staged-20261028-122553/) | `6205a83` (orig. `8dca1f2`) | yes | The rerun with the harness fixed. **All three gates pass.** One vacate (t=192), with no second vacate. All jobs SUCCEEDED, makespan 766 s. |
+| [`preempt.json`](preempt.json) | `9e3b9ba` (orig. `67d7594`) | — | Start-up and preemption latency: 20 samples. |
 
 **Aborted run (not reported).** One unstaged run (`unstaged-20261028-121658`) was stopped after about 30 s, when the harness bug was found. Its results were not read. Its log is not committed.
 
-**Harness bug, found in the first staged run and fixed in `8ca89a8` (example code, not rampgate).**
+**Harness bug, found in the first staged run and fixed in `6205a83` (example code, not rampgate).**
 - **What happened:** `docker_gpu_queue.py` fed each sample's `DeviceObserved` before that sample's `JobObserved`. rampgate infers foreign usage at a `DeviceObserved` from the jobs' *latest* usage. So while a job was growing at 256 MiB/s, its growth since the previous sample was counted as foreign: 679–807 MiB instead of the real 423 MiB.
 - **In the staged run:** this put `U` at t=190 at 6091 MiB, over the 6018 MiB threshold. With the real foreign usage it was 5707 MiB, under the threshold. Rule V would still have fired as Y kept growing (`U` reaches 6475 MiB at Y's full peak), but one or two growth steps later.
 - **What it affected:** the trigger moment. It also caused a `ForeignUsageHigh` warning that held Y's restart for 8 s.
