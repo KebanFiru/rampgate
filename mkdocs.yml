@@ -1,6 +1,8 @@
 site_name: rampgate
 site_description: Observation-based admission scheduler for jobs that ramp up their memory
-repo_name: rampgate
+site_url: https://kebanfiru.github.io/rampgate/
+repo_name: KebanFiru/rampgate
+repo_url: https://github.com/KebanFiru/rampgate
 docs_dir: docs
 strict: true
 theme:

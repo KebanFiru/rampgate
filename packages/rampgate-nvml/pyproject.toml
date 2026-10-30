@@ -27,6 +27,7 @@ classifiers = [
 
 [project.urls]
 Homepage = "https://github.com/KebanFiru/rampgate"
+Documentation = "https://kebanfiru.github.io/rampgate/"
 Source = "https://github.com/KebanFiru/rampgate"
 Changelog = "https://github.com/KebanFiru/rampgate/blob/main/packages/rampgate-nvml/CHANGELOG.md"
 Issues = "https://github.com/KebanFiru/rampgate/issues"

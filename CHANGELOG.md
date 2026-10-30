@@ -5,6 +5,7 @@
 ### Added
 - 0.1.0 packaging for all four distributions: version 0.1.0, adapters pinned to `rampgate>=0.1,<0.2`, project URLs, classifiers, PyPI-ready READMEs; `examples/quickstart.py` (the README quickstart); `CONTRIBUTING.md`; `.github/workflows/release.yml` (tag-driven, one distribution per tag, PyPI trusted publishing; not run yet); `./dev release-check` (builds all four, `twine check`, installs from the wheels in clean venvs, runs the quickstart) (L6).
 - Docs site (mkdocs-material, `./dev docs`) and `benchmarks/trace_digest.py` (L6).
+- `.github/workflows/docs.yml`: builds the docs site and deploys it to GitHub Pages on every push to `main`; `site_url` and the `Documentation` project URL point to it.
 - L5 real-hardware demonstration: `examples/docker_gpu_queue.py` (one real GPU through the Engine, JSONL log), `examples/check_run_log.py` (the L5 gates), `examples/measure_preempt.py` (start-up and SIGTERM → exit / → memory-freed latency), staged and unstaged scenarios, and the recorded runs and `docs/real-run/assumptions.md`.
 - `./dev integration`: Docker/GPU integration tests or a command, with the Docker socket, the host PID and cgroup namespaces and the GPUs (never used by `./dev ci`); `./dev build` also builds the GPU memory-hog image `docker/hog` (CUDA driver API via ctypes, no toolkit).
 - Dev dependencies `types-docker`, `types-psutil`; pytest marker `docker`.
